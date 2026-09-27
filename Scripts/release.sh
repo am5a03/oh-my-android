@@ -71,14 +71,17 @@ fi
 
 # Sparkle feed: one item, EdDSA-signed zip and feed. Uploaded with each release as appcast.xml;
 # the app reads it from releases/latest/download.
-mkdir updates && cp "$ZIP" updates/
-[[ -z "$NOTES" ]] || cp "$NOTES" "updates/${ZIP%.zip}.md"
+# In-app updates download a copy with its own name, so the download badge counts installs only.
+UPDATE_ZIP=$APP-$VERSION-update.zip
+cp "$ZIP" "$UPDATE_ZIP"
+mkdir updates && cp "$UPDATE_ZIP" updates/
+[[ -z "$NOTES" ]] || cp "$NOTES" "updates/${UPDATE_ZIP%.zip}.md"
 "../$SPARKLE_BIN/generate_appcast" --maximum-versions 1 --embed-release-notes \
   --download-url-prefix "https://github.com/$REPO/releases/download/v$VERSION/" \
   --full-release-notes-url "https://github.com/$REPO/releases/tag/v$VERSION" \
   --link "https://github.com/$REPO" -o appcast.xml updates
 "../$SPARKLE_BIN/sign_update" --verify appcast.xml
-grep -q "releases/download/v$VERSION/$ZIP" appcast.xml || { echo "appcast.xml does not point at $ZIP." >&2; exit 1; }
+grep -q "releases/download/v$VERSION/$UPDATE_ZIP" appcast.xml || { echo "appcast.xml does not point at $UPDATE_ZIP." >&2; exit 1; }
 rm -rf updates
 
 SHA=$(shasum -a 256 "$ZIP" | cut -d' ' -f1)
@@ -123,5 +126,5 @@ cp server.json ../server.json
 
 echo "Ready: dist/$ZIP (sha256 $SHA)"
 echo "Cask:  dist/oh-my-android.rb"
-echo "Feed:  dist/appcast.xml (upload with the zip)"
+echo "Feed:  dist/appcast.xml and dist/$UPDATE_ZIP (upload with the zip)"
 echo "MCP:   dist/$MCPB (upload with the zip), then commit server.json and run: mcp-publisher publish"

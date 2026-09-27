@@ -56,7 +56,7 @@ xcrun notarytool store-credentials ohmyandroid --apple-id <email> --team-id <TEA
 TEAM_ID=<TEAM_ID> Scripts/release.sh
 ```
 
-Then attach `dist/OhMyAndroid-<version>.zip`, `dist/appcast.xml` and `dist/oh-my-android-<version>.mcpb`
+Then attach `dist/OhMyAndroid-<version>.zip`, `dist/OhMyAndroid-<version>-update.zip`, `dist/appcast.xml` and `dist/oh-my-android-<version>.mcpb`
 to a GitHub release tagged `v<version>`, and copy `dist/oh-my-android.rb` to the Homebrew tap.
 
 The script also updates `server.json` (version, `.mcpb` URL and sha256). Commit it, then publish to the

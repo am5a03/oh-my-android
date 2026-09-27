@@ -1,0 +1,42 @@
+# Download badge: counts app installs only. Adds up OhMyAndroid-<version>.zip across all releases
+# (README and Homebrew downloads). Not counted: -update.zip (in-app updates, from 0.4.6), appcast.xml
+# (update checks) and .mcpb (mostly directory crawlers). Writes a shields.io endpoint file to the
+# badges branch, so main gets no commits.
+name: Download count
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: badges
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: badges
+      - name: Count installs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq '.[].assets[] | select(.name | test("^OhMyAndroid-[0-9.]+\\.zip$")) | .download_count' \
+            | awk '{ s += $1 } END { print s + 0 }')
+          echo "Installs: $count"
+          jq -n --arg n "$count" \
+            '{schemaVersion: 1, label: "downloads", message: $n, color: "3DDC84", cacheSeconds: 3600}' > downloads.json
+      - name: Push
+        run: |
+          git diff --quiet && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Download count"
+          git push

@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/ateymoori/oh-my-android/releases/latest"><img src="https://img.shields.io/github/v/release/ateymoori/oh-my-android?label=release&color=3DDC84" alt="Latest release"></a>
+  <a href="https://github.com/ateymoori/oh-my-android/releases"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fateymoori%2Foh-my-android%2Fbadges%2Fdownloads.json" alt="Downloads"></a>
   <a href="#install"><img src="https://img.shields.io/badge/brew-oh--my--android-FBB040?logo=homebrew&logoColor=white" alt="Homebrew cask"></a>
   <a href="#ai-agents-mcp"><img src="https://img.shields.io/badge/MCP-server-8A2BE2" alt="MCP server for AI agents"></a>
   <a href="https://github.com/ateymoori/oh-my-android/actions/workflows/build.yml"><img src="https://github.com/ateymoori/oh-my-android/actions/workflows/build.yml/badge.svg" alt="Build status"></a>
