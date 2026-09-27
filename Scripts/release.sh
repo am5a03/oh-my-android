@@ -127,4 +127,4 @@ cp server.json ../server.json
 echo "Ready: dist/$ZIP (sha256 $SHA)"
 echo "Cask:  dist/oh-my-android.rb"
 echo "Feed:  dist/appcast.xml and dist/$UPDATE_ZIP (upload with the zip)"
-echo "MCP:   dist/$MCPB (upload with the zip), then commit server.json and run: mcp-publisher publish"
+echo "MCP:   dist/$MCPB (upload with the zip), then commit server.json and mcpb/manifest.json and run: mcp-publisher publish"
