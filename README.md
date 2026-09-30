@@ -5,14 +5,14 @@
 <h1 align="center">Oh My Android</h1>
 
 <p align="center">
-  <b>The missing control panel for the Android Emulator on macOS.</b><br>
+  <b>The missing control panel for the Android Emulator on macOS: a free ADB GUI for Mac.</b><br>
   Dark mode, font size, RTL language, TalkBack, network speed, GPS and more: one click each, no <code>adb</code> commands.<br>
   Layout Inspector in dp, accessibility audit, and an <b>MCP server</b> so AI agents can drive your emulator.
 </p>
 
 <p align="center">
   <a href="https://github.com/ateymoori/oh-my-android/releases/latest"><img src="https://img.shields.io/github/v/release/ateymoori/oh-my-android?label=release&color=3DDC84" alt="Latest release"></a>
-  <a href="https://github.com/ateymoori/oh-my-android/releases"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fateymoori%2Foh-my-android%2Fbadges%2Fdownloads.json" alt="Downloads"></a>
+  <a href="https://royan.se/work/oh-my-android/"><img src="https://img.shields.io/badge/website-royan.se-0B7285" alt="Oh My Android website"></a>
   <a href="#install"><img src="https://img.shields.io/badge/brew-oh--my--android-FBB040?logo=homebrew&logoColor=white" alt="Homebrew cask"></a>
   <a href="#ai-agents-mcp"><img src="https://img.shields.io/badge/MCP-server-8A2BE2" alt="MCP server for AI agents"></a>
   <a href="https://github.com/ateymoori/oh-my-android/actions/workflows/build.yml"><img src="https://github.com/ateymoori/oh-my-android/actions/workflows/build.yml/badge.svg" alt="Build status"></a>
@@ -22,7 +22,8 @@
 </p>
 
 <p align="center">
-  <b>Install:</b> <code>brew install --cask ateymoori/tap/oh-my-android</code> · free and open source
+  <b>Install:</b> <code>brew install --cask ateymoori/tap/oh-my-android</code> · free and open source<br>
+  <b>Website:</b> <a href="https://royan.se/work/oh-my-android/">royan.se/work/oh-my-android</a>
 </p>
 
 <p align="center">
@@ -50,7 +51,8 @@
   <a href="#ai-agents-mcp">AI agents (MCP)</a> ·
   <a href="#troubleshooting">Troubleshooting</a> ·
   <a href="#faq">FAQ</a> ·
-  <a href="CONTRIBUTING.md">Contribute</a>
+  <a href="CONTRIBUTING.md">Contribute</a> ·
+  <a href="https://royan.se/work/oh-my-android/">Website</a>
 </p>
 
 ## Why Oh My Android?
@@ -61,7 +63,9 @@ clear the app data, take a screenshot. Each one is buried in the emulator's sett
 `adb shell` command you have to look up again.
 
 **Oh My Android puts all of them in a floating panel next to the emulator.** Every icon shows the
-real state of the device, and one click changes it.
+real state of the device, and one click changes it. It is a native macOS app for Android developers and
+QA testers: an Android Emulator GUI, an `adb` GUI for real phones, a Layout Inspector in dp, an
+accessibility checker, and an Android MCP server for Claude Code, Codex, Cursor and other AI coding agents.
 
 - ⚡ **One click** for nearly 50 everyday test actions
 - 📱 **Emulators and real phones**: USB or Wi‑Fi `adb`
@@ -294,6 +298,33 @@ the agent starts the server when it needs it.
 </details>
 
 <details>
+<summary><b>How do I turn on dark mode on the Android Emulator?</b></summary>
+
+Click the 🌙 icon in the panel. The adb way is `adb shell cmd uimode night yes` (and `no` to turn it off).
+</details>
+
+<details>
+<summary><b>How do I test RTL layouts on the Android Emulator?</b></summary>
+
+Pick "العربية (RTL)" or another RTL language from the 🌐 menu, or a pseudo-locale (`ar-XB`, `en-XA`) to
+find hard-coded strings and mirroring bugs. The adb way is `adb shell cmd locale set-device-locale ar-EG`.
+</details>
+
+<details>
+<summary><b>How do I simulate a slow network on the Android Emulator?</b></summary>
+
+Pick a profile (LTE, HSDPA, 3G, EDGE, GPRS, GSM) from the network menu. The panel sets both speed and
+latency, the same as `adb emu network speed edge` and `adb emu network delay edge`.
+</details>
+
+<details>
+<summary><b>Is there an Android MCP server for Claude Code, Codex or Cursor?</b></summary>
+
+Yes. `ohmyandroid-mcp` ships inside the app. Your agent can take screenshots in dp, read the UI tree, tap,
+type, switch dark mode, font size or RTL, and read logcat. See [AI agents (MCP)](#ai-agents-mcp).
+</details>
+
+<details>
 <summary><b>Is there an npx or uvx package?</b></summary>
 
 No. The server is one native binary with no runtime; Homebrew puts `ohmyandroid-mcp` on your `PATH`.
@@ -390,8 +421,15 @@ Adding a feature is one small Swift struct: see [CONTRIBUTING.md](CONTRIBUTING.m
 
 ## License
 
-[MIT](LICENSE) © 2026 Royan AB.
+[MIT](LICENSE) © 2026 [Royan AB](https://royan.se).
 
 Android is a trademark of Google LLC. Oh My Android is not affiliated with or endorsed by Google.
 The Android robot is reproduced or modified from work created and shared by Google and used according
 to terms described in the [Creative Commons 3.0 Attribution License](https://creativecommons.org/licenses/by/3.0/).
+
+---
+
+<p align="center">
+  Made in Sweden by 🇸🇪 <a href="https://royan.se"><b>Royan AB</b></a><br>
+  <a href="https://royan.se/work/oh-my-android/">Oh My Android website</a> · <a href="https://royan.se">royan.se</a>
+</p>

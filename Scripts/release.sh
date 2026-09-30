@@ -93,7 +93,7 @@ cask "oh-my-android" do
   url "https://github.com/$REPO/releases/download/v#{version}/$APP-#{version}.zip"
   name "Oh My Android"
   desc "Control panel and MCP server for the Android emulator and devices"
-  homepage "https://github.com/$REPO"
+  homepage "https://royan.se/work/oh-my-android/"
 
   depends_on macos: :tahoe
 
