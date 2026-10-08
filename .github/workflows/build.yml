@@ -13,6 +13,8 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      - name: Test selected-app quick actions
+        run: bash Scripts/test-quick-actions.sh
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate project

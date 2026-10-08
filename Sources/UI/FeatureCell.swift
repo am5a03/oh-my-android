@@ -7,7 +7,7 @@ struct FeatureCell: View {
     @Environment(AppModel.self) private var model
     @State private var showPopover = false
     @State private var confirmDestructive = false
-    /// Per feature, so a tester can silence "Clear data" and still be asked before "Uninstall".
+    /// Legacy feature confirmations; selected-app destructive actions always confirm their exact target.
     @AppStorage private var skipConfirmation: Bool
 
     init(feature: any Feature, context: DeviceContext) {
@@ -36,6 +36,17 @@ struct FeatureCell: View {
     @ViewBuilder
     private var control: some View {
         switch feature {
+        // Desktop app actions use the same pinned target and confirmation path as Quick Actions.
+        // Keep the legacy feature implementation unchanged for existing MCP clients.
+        case let action as ForegroundAppActionFeature:
+            iconButton {
+                guard let selectedAction = AppAction.feature(action.id) else { return }
+                model.apps.request(selectedAction, on: context.device)
+            }
+            .disabled(model.apps.target(on: context.device) == nil || model.apps.isBusy || AppAction.feature(action.id) == nil)
+            .help(action.id == "app.revoke"
+                  ? "Revoke granted runtime permissions for the selected app and Android user. Fixed permissions are unchanged."
+                  : "\(action.title) for the selected app")
         case let toggle as any ToggleFeature:
             iconButton { store.toggle(toggle, context) }
         case let action as any ActionFeature where action.isDestructive:

@@ -1,35 +1,43 @@
 import Foundation
 import Observation
 
-/// Connected devices and the current selection. Updates arrive from adb's own device tracker; while no
-/// device is ready (adb server restarting, emulator offline, phone unauthorized) a short recovery loop
-/// re-checks every few seconds until one is, then stops.
+/// Keeps a sticky device selection, including while that device is disconnected.
 @MainActor
 @Observable
 final class DeviceStore {
     private(set) var devices: [Device] = []
-    /// Last adb failure, shown when the list is empty.
     private(set) var lastError: String?
     var selected: Device? {
-        didSet { if let serial = selected?.serial { UserDefaults.standard.set(serial, forKey: Self.lastSerialKey) } }
+        didSet {
+            guard let selected else { return }
+            defaults.set(selected.serial, forKey: Self.lastSerialKey)
+            defaults.set(selected.model, forKey: Self.lastModelKey)
+            defaults.set(selected.avdName, forKey: Self.lastAVDKey)
+        }
     }
     private static let lastSerialKey = AgentSettings.panelDeviceKey
+    private static let lastModelKey = "panel.lastDeviceModel"
+    private static let lastAVDKey = "panel.lastDeviceAVD"
     private static let recoveryInterval: Duration = .seconds(4)
 
     private let adb: ADBClient
     private let tracker: DeviceTracking
+    private let defaults: UserDefaults
     private var trackingTask: Task<Void, Never>?
     private var recoveryTask: Task<Void, Never>?
 
-    init(adb: ADBClient, tracker: DeviceTracking) {
+    init(adb: ADBClient, tracker: DeviceTracking, defaults: UserDefaults = .standard) {
         self.adb = adb
         self.tracker = tracker
+        self.defaults = defaults
+        if let serial = defaults.string(forKey: Self.lastSerialKey) {
+            selected = Device(serial: serial, model: defaults.string(forKey: Self.lastModelKey) ?? serial,
+                              state: .offline, avdName: defaults.string(forKey: Self.lastAVDKey))
+        }
     }
 
-    /// True when devices exist but none accepts commands (offline, unauthorized, booting).
     var hasOnlyUnreadyDevices: Bool { !devices.isEmpty && !devices.contains(where: \.isReady) }
 
-    /// Starts the adb server first: a server spawned implicitly by the tracker would inherit its pipe.
     func start(startServer: @escaping @Sendable () async -> Void) {
         trackingTask?.cancel()
         trackingTask = Task { [weak self, tracker] in
@@ -41,7 +49,6 @@ final class DeviceStore {
         }
     }
 
-    /// Called on quit: closes the connection to the adb server.
     func stop() {
         trackingTask?.cancel()
         recoveryTask?.cancel()
@@ -57,17 +64,26 @@ final class DeviceStore {
             lastError = error.localizedDescription
             devices = []
         }
-        if let selected, let updated = devices.first(where: { $0.id == selected.id }), updated.isReady {
-            if updated != selected { self.selected = updated }
+        if let selected {
+            let updated = devices.first {
+                // Migrate old serial-only preferences once; subsequent AVD choices use stable names.
+                if selected.isEmulator && selected.avdName == nil { return $0.serial == selected.serial }
+                return $0.appSelectionKey == selected.appSelectionKey
+            }
+            if let updated {
+                if updated != selected { self.selected = updated }
+            } else {
+                var disconnected = selected
+                disconnected.state = .offline
+                if disconnected != selected { self.selected = disconnected }
+            }
         } else {
-            // Come back to the device used last time; otherwise the first one that is ready.
-            let last = UserDefaults.standard.string(forKey: Self.lastSerialKey)
-            selected = devices.first { $0.isReady && $0.serial == last } ?? devices.first { $0.isReady }
+            // First launch only. Once a target exists, a disconnect never selects another device.
+            selected = devices.first { $0.isReady }
         }
         updateRecovery()
     }
 
-    /// Manual fix for a stuck adb: restart the server, then re-read.
     func restartServer() async {
         lastError = nil
         try? await adb.restartServer()
@@ -76,8 +92,8 @@ final class DeviceStore {
     }
 
     private func updateRecovery() {
-        // Also while a device boots: adb reports no event when boot completes.
-        let needsRecovery = selected == nil || devices.contains { $0.isOnline && !$0.isBooted }
+        // Preserve the existing bounded recovery loop while the chosen device is unready.
+        let needsRecovery = selected?.isReady != true || lastError != nil || devices.contains { $0.isOnline && !$0.isBooted }
         if needsRecovery, recoveryTask == nil {
             recoveryTask = Task { [weak self] in
                 while !Task.isCancelled {

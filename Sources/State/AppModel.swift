@@ -11,6 +11,8 @@ final class AppModel {
     let features = FeatureStore()
     let deviceInfo = DeviceInfoStore(reader: DeviceInfoReader())
     let emulators: EmulatorStore?
+    let apps: AppSelectionStore
+    let links = DeepLinkStore()
 
     private let foregroundReader: ForegroundAppReading = ForegroundAppReader()
     /// Filled by the app delegate once windows exist.
@@ -34,11 +36,12 @@ final class AppModel {
         adb = bridge
         devices = bridge.map { DeviceStore(adb: $0, tracker: ADBDeviceTracker(adb: $0.sdk.adb)) }
         emulators = sdk.map(EmulatorStore.init)
+        apps = AppSelectionStore(runner: bridge.map { AppCommandRunner(adb: $0) })
         if let bridge { devices?.start { await bridge.startServer() } }
     }
 
     var context: DeviceContext? {
-        guard let adb, let device = devices?.selected else { return nil }
+        guard let adb, let device = devices?.selected, device.isReady else { return nil }
         return DeviceContext(device: device, adb: adb, foreground: foregroundReader, host: host)
     }
 
@@ -58,22 +61,28 @@ final class AppModel {
     var panelState: PanelState {
         guard let devices else { return .sdkMissing }
         if let context { return .ready(context) }
-        if let avd = emulators?.starting { return .starting(avd: avd) }
         if let error = devices.lastError { return .adbFailed(error) }
+        // Keep the chosen target visible when it disconnects; never silently operate on a neighbour.
+        if let selected = devices.selected {
+            if selected.state == .unauthorized { return .unauthorized(selected) }
+            if selected.isOnline && !selected.isBooted { return .booting(selected) }
+            return .offline(selected)
+        }
+        if let avd = emulators?.starting { return .starting(avd: avd) }
         if let device = devices.devices.first(where: { $0.state == .unauthorized }) { return .unauthorized(device) }
         if let device = devices.devices.first(where: { !$0.isReady }) {
-            // Starting: an emulator is offline until adbd runs; any device is online before boot completes.
             return device.isOnline || device.isEmulator ? .booting(device) : .offline(device)
         }
         return .noDevice
     }
 
-    /// Full read of the selected device: feature values and device facts.
+    /// Full read of the selected device: feature values, device facts, and app inventory.
     func reload() async {
         guard let context else { return }
         async let info: () = deviceInfo.load(context)
         async let values: () = features.refreshAll(context)
-        _ = await (info, values)
+        async let inventory: () = apps.refresh(on: context.device)
+        _ = await (info, values, inventory)
     }
 
     /// Re-read only when the last read is old. Called when the user's attention returns to the panel.
@@ -81,6 +90,7 @@ final class AppModel {
         guard let context else { return }
         async let info: () = deviceInfo.loadIfStale(context)
         async let values: () = features.refreshIfStale(context)
-        _ = await (info, values)
+        async let inventory: () = apps.refreshIfStale(on: context.device)
+        _ = await (info, values, inventory)
     }
 }
