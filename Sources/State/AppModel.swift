@@ -13,6 +13,14 @@ final class AppModel {
     let emulators: EmulatorStore?
     let apps: AppSelectionStore
     let links = DeepLinkStore()
+    let simulators = SimulatorStore()
+    var platform = CompanionPlatform(rawValue: UserDefaults.standard.string(forKey: "panel.platform") ?? "") ?? .android {
+        didSet {
+            UserDefaults.standard.set(platform.rawValue, forKey: "panel.platform")
+            apps.pending = nil
+            simulators.cancelReinstall()
+        }
+    }
 
     private let foregroundReader: ForegroundAppReading = ForegroundAppReader()
     /// Filled by the app delegate once windows exist.
@@ -41,7 +49,7 @@ final class AppModel {
     }
 
     var context: DeviceContext? {
-        guard let adb, let device = devices?.selected, device.isReady else { return nil }
+        guard platform == .android, let adb, let device = devices?.selected, device.isReady else { return nil }
         return DeviceContext(device: device, adb: adb, foreground: foregroundReader, host: host)
     }
 
