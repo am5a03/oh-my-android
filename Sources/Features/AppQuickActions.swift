@@ -6,3 +6,5 @@ extension AppCommandRunner {
                   devices: { try await adb.devices() })
     }
 }
+
+extension AppCommandRunner: AppControlling {}

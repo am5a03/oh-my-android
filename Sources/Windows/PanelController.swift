@@ -79,7 +79,7 @@ final class PanelController {
     }
 
     private func updateDockTimer() {
-        let shouldRun = model.isPinned && model.dockToEmulator && panel.isVisible && emulatorIsRunning
+        let shouldRun = model.platform == .android && model.isPinned && model.dockToEmulator && panel.isVisible && emulatorIsRunning
         if shouldRun, dockTimer == nil {
             let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
                 Task { @MainActor in self?.dockIfNeeded() }
@@ -95,7 +95,7 @@ final class PanelController {
     }
 
     private func dockIfNeeded() {
-        guard model.isPinned, model.dockToEmulator else { return updateDockTimer() }
+        guard model.platform == .android, model.isPinned, model.dockToEmulator else { return updateDockTimer() }
         guard let emulator = tracker.emulatorFrame(consolePort: model.devices?.selected?.consolePort) else { return }
         let gap: CGFloat = 12
         let visible = NSScreen.screens.first { $0.frame.intersects(emulator) }?.visibleFrame ?? emulator

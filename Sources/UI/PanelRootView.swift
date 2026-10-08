@@ -6,10 +6,20 @@ struct PanelRootView: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
+        @Bindable var model = model
         VStack(spacing: Theme.sectionSpacing) {
-            HeaderView()
-            DeviceInfoView()
-            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+            Picker("Platform", selection: $model.platform) {
+                ForEach(CompanionPlatform.allCases) { platform in Text(platform.title).tag(platform) }
+            }
+            .pickerStyle(.segmented)
+            .disabled(model.apps.isBusy || model.simulators.locksSelection)
+            if model.platform == .android {
+                HeaderView()
+                DeviceInfoView()
+                content.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                SimulatorPanelView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .padding(Theme.panelPadding)
         .frame(width: Theme.panelSize.width, height: Theme.panelSize.height, alignment: .top)
@@ -22,10 +32,13 @@ struct PanelRootView: View {
                 .strokeBorder(Theme.accent, lineWidth: isDropTargeted ? 3 : 0)
                 .animation(.easeOut(duration: 0.15), value: isDropTargeted)
         }
-        .overlay(alignment: .bottom) { ToastView(toast: model.features.toast).padding(.bottom, 14) }
+        .overlay(alignment: .bottom) {
+            if model.platform == .android { ToastView(toast: model.features.toast).padding(.bottom, 14) }
+        }
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted, perform: handleDrop)
         .task(id: model.devices?.selected) { await model.reload() }
         .task { await model.emulators?.reload() }
+        .task(id: model.platform) { if model.platform == .android { await model.reload() } }
         .onChange(of: model.devices?.devices ?? []) { _, devices in model.emulators?.devicesChanged(devices) }
         // The device can change on its own (Android settings, Studio). Re-read when attention returns, not on a timer.
         .onHover { inside in if inside { Task { await model.reloadIfStale() } } }
@@ -123,7 +136,8 @@ struct PanelRootView: View {
 
     /// APK: install. PNG/JPEG: open the Layout Inspector with the image as design overlay.
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        FileDrop.load(providers, extensions: ["apk"] + FileDrop.imageExtensions) { url in
+        guard model.platform == .android else { return false }
+        return FileDrop.load(providers, extensions: ["apk"] + FileDrop.imageExtensions) { url in
             guard let context = model.context else { return }
             if url.pathExtension.lowercased() == "apk" {
                 model.features.install(url, context)
