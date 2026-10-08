@@ -67,6 +67,8 @@ final class SimulatorStore {
 
     func selectDevice(_ id: String) {
         guard !locksSelection, devices.contains(where: { $0.udid == id && $0.isAvailable }) else { return }
+        // A same-ID selection does not rerun SwiftUI's task(id:); keep its current inventory.
+        guard id != archive.deviceID else { return }
         invalidateReads()
         archive.deviceID = id
         installedApps = []
