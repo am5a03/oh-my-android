@@ -15,31 +15,25 @@ final class FeatureStore {
     private(set) var values: [String: FeatureValue] = [:]
     private(set) var busy: Set<String> = []
     private(set) var toast: Toast?
-
     private var toastTask: Task<Void, Never>?
     private var lastFullRefresh: Date = .distantPast
     private var activeRefreshes = 0
-    /// Device the values belong to. Reads that finish after a device switch are dropped.
     private var valuesSerial: String?
     private let batchReader = BatchReader()
-    /// The device can change on its own (Android settings, Studio). adb offers no change events for
-    /// settings, so the panel re-reads when the pointer returns to it: one batched shell call, no timer.
     private static let panelStaleAfter: TimeInterval = 5
 
     func value(of feature: any Feature) -> FeatureValue? { values[feature.id] }
     func isBusy(_ feature: any Feature) -> Bool { busy.contains(feature.id) }
 
-    /// Re-reads everything if the last full read is older than `panelStaleAfter`. Cheap to call often.
     func refreshIfStale(_ context: DeviceContext) async {
         guard Date().timeIntervalSince(lastFullRefresh) > Self.panelStaleAfter, activeRefreshes == 0 else { return }
         await refreshAll(context)
     }
 
-    /// Full read. Cancelling the calling task (device switch) discards its result.
     func refreshAll(_ context: DeviceContext) async {
         let serial = context.device.serial
         if valuesSerial != serial {
-            values = [:]  // never show, or toggle from, another device's state
+            values = [:]
             busy = []
             valuesSerial = serial
         }
@@ -51,17 +45,13 @@ final class FeatureStore {
         lastFullRefresh = Date()
     }
 
-    /// One shell round-trip for every batchable feature; console-backed features read concurrently beside it.
     private func readAll(_ context: DeviceContext) async -> [String: FeatureValue] {
         let features = FeatureCatalog.all.filter { $0.supports(context.device) }
         let batchable = features.compactMap { $0 as? any BatchReadable }
         let others = features.filter { !($0 is any BatchReadable) }
-
         async let batched = batchReader.read(batchable, context)
         async let individual: [String: FeatureValue] = withTaskGroup(of: (String, FeatureValue?).self) { group in
-            for feature in others {
-                group.addTask { (feature.id, await Self.read(feature, context)) }
-            }
+            for feature in others { group.addTask { (feature.id, await Self.read(feature, context)) } }
             var values: [String: FeatureValue] = [:]
             for await (id, value) in group { if let value { values[id] = value } }
             return values
@@ -78,10 +68,7 @@ final class FeatureStore {
         guard !isBusy(feature) else { return }
         let current = if case .toggle(let on) = values[feature.id] { on } else { false }
         values[feature.id] = .toggle(!current)
-        run(feature, context) {
-            try await feature.setOn(!current, context)
-            return nil
-        }
+        run(feature, context) { try await feature.setOn(!current, context); return nil }
     }
 
     func step(_ feature: any StepperFeature, by delta: Int, _ context: DeviceContext) {
@@ -94,30 +81,21 @@ final class FeatureStore {
     func setNumber(_ feature: any StepperFeature, _ value: Double, _ context: DeviceContext) {
         guard !isBusy(feature) else { return }
         values[feature.id] = .number(value)
-        run(feature, context) {
-            try await feature.setValue(value, context)
-            return nil
-        }
+        run(feature, context) { try await feature.setValue(value, context); return nil }
     }
 
     func choose(_ feature: any ChoiceFeature, _ optionID: String, _ context: DeviceContext) {
         guard !isBusy(feature) else { return }
         values[feature.id] = .choice(optionID)
-        run(feature, context) {
-            try await feature.select(optionID, context)
-            return nil
-        }
+        run(feature, context) { try await feature.select(optionID, context); return nil }
     }
 
     func perform(_ feature: any ActionFeature, _ context: DeviceContext) {
         run(feature, context, refreshAfter: false) { try await feature.perform(context) }
     }
-
     func perform(_ feature: any TextActionFeature, text: String, _ context: DeviceContext) {
         run(feature, context, refreshAfter: false) { try await feature.perform(text, context) }
     }
-
-    /// Dropped APK: same path as the Install icon, so the icon shows busy and the result becomes a toast.
     func install(_ url: URL, _ context: DeviceContext) {
         run(InstallAPKFeature(), context, refreshAfter: false) { try await APKInstaller.install(url, context) }
     }
@@ -132,40 +110,30 @@ final class FeatureStore {
         }
     }
 
-    // MARK: - Private
-
     private func run(
-        _ feature: any Feature,
-        _ context: DeviceContext,
-        refreshAfter: Bool = true,
+        _ feature: any Feature, _ context: DeviceContext, refreshAfter: Bool = true,
         _ work: @escaping @Sendable () async throws -> String?
     ) {
-        // A second tap while the first command runs would race it on the device.
         guard busy.insert(feature.id).inserted else { return }
         Task {
             defer { busy.remove(feature.id) }
             do {
-                if let message = try await work() { show(.init(kind: .info, message: message)) }
-            } catch {
-                show(.init(kind: .error, message: error.localizedDescription))
-            }
+                let message = try await DeviceOperationLock.withLock("android:\(context.device.serial)", work)
+                if let message { show(.init(kind: .info, message: message)) }
+            } catch { show(.init(kind: .error, message: error.localizedDescription)) }
             if refreshAfter { await refresh(feature, context) }
         }
     }
 
     private static func read(_ feature: any Feature, _ context: DeviceContext) async -> FeatureValue? {
         switch feature {
-        case let batchable as any BatchReadable:
-            return try? await batchable.readValue(context)
-        case let toggle as any ToggleFeature:
-            return (try? await toggle.isOn(context)).map { .toggle($0) }
-        case let stepper as any StepperFeature:
-            return (try? await stepper.value(context)).map { .number($0) }
+        case let batchable as any BatchReadable: return try? await batchable.readValue(context)
+        case let toggle as any ToggleFeature: return (try? await toggle.isOn(context)).map { .toggle($0) }
+        case let stepper as any StepperFeature: return (try? await stepper.value(context)).map { .number($0) }
         case let choice as any ChoiceFeature:
             guard let selection = try? await choice.selection(context) else { return nil }
             return .choice(selection)
-        default:
-            return nil
+        default: return nil
         }
     }
 }

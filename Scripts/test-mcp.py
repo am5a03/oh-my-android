@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Protocol test of the Oh My Android MCP server. Needs no device, so it runs in CI.
-
-Usage: Scripts/test-mcp.py <path to ohmyandroid-mcp>
-Checks both protocol eras (initialize handshake and per-request _meta), tool schemas, prompts,
-errors, and that stdout carries nothing but JSON-RPC.
-"""
+"""Device-free wire-protocol tests. No valid mutating calls are issued."""
 import json
 import subprocess
 import sys
@@ -20,21 +15,20 @@ def check(condition, message):
 
 
 def session(server, messages):
-    """Sends all messages, closes stdin, returns responses by id. The server must answer before exiting."""
     lines = "".join(json.dumps(m) + "\n" for m in messages)
-    out = subprocess.run([server], input=lines, capture_output=True, text=True, timeout=30).stdout
+    result = subprocess.run([server], input=lines, capture_output=True, text=True, timeout=30)
+    check(result.returncode == 0, f"server failed: {result.stderr[:300]}")
     responses = {}
-    for line in out.splitlines():
-        message = json.loads(line)  # every stdout line must be JSON
-        check(message.get("jsonrpc") == "2.0", f"not JSON-RPC 2.0: {line[:80]}")
+    for line in result.stdout.splitlines():
+        message = json.loads(line)
+        check(message.get("jsonrpc") == "2.0", f"not JSON-RPC: {line[:80]}")
         responses[message.get("id")] = message
     return responses
 
 
 def main(server):
     legacy = session(server, [
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-         "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}},
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
         {"jsonrpc": "2.0", "id": 3, "method": "prompts/list"},
@@ -43,58 +37,63 @@ def main(server):
         {"jsonrpc": "2.0", "id": 6, "method": "ping"},
         {"jsonrpc": "2.0", "id": 7, "method": "no/such/method"},
         {"jsonrpc": "2.0", "id": 8, "method": "initialize", "params": {"protocolVersion": "2099-01-01", "capabilities": {}}},
+        {"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "screenshot", "arguments": {}}},
+        {"jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": {"name": "manage_app", "arguments": {"action": "clear_data"}}},
     ])
     init = legacy[1]["result"]
-    check(init["protocolVersion"] == "2025-06-18", "initialize echoes a supported version")
-    check(legacy[8]["result"]["protocolVersion"] == "2025-11-25", "initialize falls back to the latest legacy version")
-    check(init["serverInfo"]["name"] == "oh-my-android", "serverInfo name")
-    check("resultType" not in init, "legacy results carry no modern fields")
-
+    check(init["protocolVersion"] == "2025-06-18", "supported legacy version")
+    check(legacy[8]["result"]["protocolVersion"] == "2025-11-25", "legacy version fallback")
+    check(init["serverInfo"]["name"] == "oh-my-android", "server name")
+    check("resultType" not in init, "legacy response format")
+    check(legacy[9]["result"].get("isError") is True, "missing screenshot target refused")
+    check(legacy[10]["result"].get("isError") is True, "incomplete destructive call refused")
     tools = legacy[2]["result"]["tools"]
     names = [t["name"] for t in tools]
-    check(len(names) == len(set(names)), "tool names are unique")
-    check(len(tools) == 18, f"18 tools, got {len(tools)}")
+    check(len(names) == len(set(names)), "unique names")
+    check(len(tools) == 19, f"19 tools, got {len(tools)}")
+    check("get_app_target" in names, "explicit target discovery available")
     for tool in tools:
         schema = tool["inputSchema"]
-        check(schema.get("type") == "object", f"{tool['name']}: schema type object")
         props = schema.get("properties", {})
-        check(set(schema.get("required", [])) <= set(props), f"{tool['name']}: required names exist")
+        required = set(schema.get("required", []))
+        check(schema.get("type") == "object", f"{tool['name']}: object schema")
+        check(required <= set(props), f"{tool['name']}: required names exist")
+        if "device" in props:
+            check("device" in required, f"{tool['name']}: explicit device required")
+        if tool["name"] in ("open_app", "manage_app"):
+            check({"package", "user_id", "device"} <= required, f"{tool['name']}: complete app target required")
+        if tool["name"] in ("read_preferences", "query_database"):
+            check("package" in required, f"{tool['name']}: no foreground fallback")
         for name, prop in props.items():
-            check("type" in prop and prop.get("description"), f"{tool['name']}.{name}: type and description")
-        annotations = tool["annotations"]
-        check(isinstance(annotations.get("readOnlyHint"), bool), f"{tool['name']}: readOnlyHint")
-        check(tool["description"] and len(tool["description"]) < 400, f"{tool['name']}: short description")
+            check("type" in prop and prop.get("description"), f"{tool['name']}.{name}: type/description")
+        check(isinstance(tool["annotations"].get("readOnlyHint"), bool), "read annotation")
+        check(tool["description"] and len(tool["description"]) < 400, "compact description")
     size = sum(len(json.dumps({k: t[k] for k in ("name", "description", "inputSchema")}, separators=(",", ":"))) for t in tools)
-    check(size < 14000, f"tool definitions stay small for the model ({size} chars)")
-
+    check(size < 18000, f"compact tool definitions ({size})")
     check(len(legacy[3]["result"]["prompts"]) == 3, "3 prompts")
-    check("com.example" in legacy[4]["result"]["messages"][0]["content"]["text"], "prompt argument is filled in")
-    check(legacy[5]["error"]["code"] == -32602, "unknown tool is invalid params")
+    check("com.example" in legacy[4]["result"]["messages"][0]["content"]["text"], "prompt substitution")
+    check(legacy[5]["error"]["code"] == -32602, "unknown tool")
     check(legacy[6]["result"] == {}, "ping")
     check(legacy[7]["error"]["code"] == -32601, "unknown method")
-
     modern = session(server, [
         {"jsonrpc": "2.0", "id": "d", "method": "server/discover", "params": {"_meta": MODERN}},
         {"jsonrpc": "2.0", "id": "t", "method": "tools/list", "params": {"_meta": MODERN}},
-        {"jsonrpc": "2.0", "id": "v", "method": "tools/list",
-         "params": {"_meta": {**MODERN, "io.modelcontextprotocol/protocolVersion": "1999-01-01"}}},
+        {"jsonrpc": "2.0", "id": "v", "method": "tools/list", "params": {"_meta": {**MODERN, "io.modelcontextprotocol/protocolVersion": "1999-01-01"}}},
         {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": "unknown"}},
         "not json",
     ])
     discover = modern["d"]["result"]
-    check(discover["supportedVersions"] == ["2026-07-28"], "discover lists modern versions")
-    check(discover["resultType"] == "complete", "modern results carry resultType")
-    check(discover["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "oh-my-android", "modern serverInfo in _meta")
+    check(discover["supportedVersions"] == ["2026-07-28"], "modern versions")
+    check(discover["resultType"] == "complete", "modern result type")
+    check(discover["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "oh-my-android", "modern serverInfo")
     listed = modern["t"]["result"]
-    check(listed["ttlMs"] > 0 and listed["cacheScope"] == "public", "modern lists are cacheable")
-    check([t["name"] for t in listed["tools"]] == names, "tool order is stable across eras")
-    check(modern["v"]["error"]["code"] == -32022, "unsupported version error")
-    check(modern["v"]["error"]["data"]["requested"] == "1999-01-01", "unsupported version names the request")
+    check(listed["ttlMs"] > 0 and listed["cacheScope"] == "public", "cacheable lists")
+    check([t["name"] for t in listed["tools"]] == names, "stable tool order")
+    check(modern["v"]["error"]["code"] == -32022, "unsupported version")
+    check(modern["v"]["error"]["data"]["requested"] == "1999-01-01", "version error details")
     check(modern[None]["error"]["code"] == -32700, "parse error")
-
     help_text = subprocess.run([server, "--help"], capture_output=True, text=True, timeout=10).stdout
-    check("claude mcp add" in help_text, "--help shows setup")
-
+    check("claude mcp add" in help_text, "help setup")
     print(f"{len(tools)} tools, {size} chars of definitions. " + ("FAILED" if failures else "All checks passed."))
     sys.exit(1 if failures else 0)
 
