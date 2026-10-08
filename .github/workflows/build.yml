@@ -19,6 +19,8 @@ jobs:
         run: brew install xcodegen
       - name: Generate project
         run: xcodegen generate
+      - name: Test MCP safety and device locks
+        run: bash Scripts/test-mcp-safety.sh
       - name: Build (warnings are errors)
         run: |
           xcodebuild -project OhMyAndroid.xcodeproj -scheme OhMyAndroid -configuration Release \

@@ -5,7 +5,7 @@ struct AppInventory: Sendable {
     let packages: [String]
 }
 
-/// All I/O is injected. The desktop adapter uses ADBClient, which owns process timeouts and quoting.
+/// All I/O is injected. Desktop and MCP callers share these validated app operations.
 struct AppCommandRunner: Sendable {
     let shell: @Sendable (Device, String) async throws -> String
     let devices: @Sendable () async throws -> [Device]
@@ -30,6 +30,7 @@ struct AppCommandRunner: Sendable {
 
     /// No fallback to another device, another Android user, or the foreground app.
     func validate(_ target: AppTarget) async throws {
+        try Task.checkCancellation()
         _ = try AppInput.package(target.app.package)
         guard target.userID >= 0,
               let live = try await devices().first(where: { $0.serial == target.device.serial }),
@@ -47,6 +48,12 @@ struct AppCommandRunner: Sendable {
     }
 
     func perform(_ action: AppAction, target: AppTarget) async throws -> String {
+        try await DeviceOperationLock.withLock("android:\(target.device.serial)") {
+            try await performUnlocked(action, target: target)
+        }
+    }
+
+    private func performUnlocked(_ action: AppAction, target: AppTarget) async throws -> String {
         try await validate(target)
         let package = target.app.package.shellQuoted
         let user = target.userID
@@ -55,7 +62,8 @@ struct AppCommandRunner: Sendable {
             try await launch(target)
         case .restart:
             try await stop(target)
-            try await launch(target)
+            do { try await launch(target) }
+            catch { throw AppError("App was stopped, but relaunch failed: \(error.localizedDescription)") }
         case .clearData, .clearAndLaunch:
             let output = try await shell(target.device, "pm clear --user \(user) \(package)")
             try Self.requireSuccess(output)
@@ -77,12 +85,22 @@ struct AppCommandRunner: Sendable {
     }
 
     func open(_ rawURL: String, routing: LinkRouting, stopFirst: Bool, target: AppTarget) async throws -> String {
+        try await DeviceOperationLock.withLock("android:\(target.device.serial)") {
+            try await openUnlocked(rawURL, routing: routing, stopFirst: stopFirst, target: target)
+        }
+    }
+
+    private func openUnlocked(_ rawURL: String, routing: LinkRouting, stopFirst: Bool, target: AppTarget) async throws -> String {
         let url = try AppInput.link(rawURL)
         try await validate(target)
         if stopFirst { try await stop(target) }
         let constraint = routing == .selectedApp ? " -p \(target.app.package.shellQuoted)" : ""
         let command = "am start -W --user \(target.userID) -a android.intent.action.VIEW -c android.intent.category.BROWSABLE -d \(url.shellQuoted)\(constraint)"
-        try Self.requireStarted(try await shell(target.device, command))
+        do { try Self.requireStarted(try await shell(target.device, command)) }
+        catch {
+            if stopFirst { throw AppError("App was stopped, but opening the link failed: \(error.localizedDescription)") }
+            throw error
+        }
         return "Link opened on \(target.device.displayName) (\(routing.title.lowercased()))"
     }
 

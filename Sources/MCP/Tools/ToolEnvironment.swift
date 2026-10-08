@@ -25,31 +25,15 @@ final class ToolEnvironment: Sendable {
         return bridge
     }
 
+    /// Explicit resolution even for callers outside the tool safety wrapper.
     func context(serial: String?) async throws -> DeviceContext {
+        guard let serial, !serial.isEmpty else {
+            throw ToolInputError("device is required. Call list_devices and pass the intended serial; automatic targeting is disabled.")
+        }
         let adb = try await adb()
         let devices = try await adb.devices()
-        let device: Device
-        if let serial {
-            guard let match = devices.first(where: { $0.serial == serial }) else {
-                throw AppError("No device \(serial). Connected: \(Self.describe(devices)).")
-            }
-            device = match
-        } else {
-            let ready = devices.filter(\.isReady)
-            switch ready.count {
-            case 0:
-                throw AppError(devices.isEmpty
-                    ? "No device connected. Start an emulator (list_devices shows the AVDs) or connect a phone with USB debugging on."
-                    : "No device ready: \(Self.describe(devices)).")
-            case 1:
-                device = ready[0]
-            default:
-                // Several: the one selected in the Oh My Android panel, else ask.
-                guard let panel = AgentSettings.panelDevice, let selected = ready.first(where: { $0.serial == panel }) else {
-                    throw AppError("Several devices are ready; pass device: \(ready.map(\.serial).joined(separator: ", ")).")
-                }
-                device = selected
-            }
+        guard let device = devices.first(where: { $0.serial == serial }) else {
+            throw AppError("No device \(serial). Connected: \(Self.describe(devices)).")
         }
         if let problem = device.problem { throw AppError("\(device.serial) is \(problem).") }
         return DeviceContext(device: device, adb: adb, foreground: foreground, host: HostActions())
@@ -97,15 +81,10 @@ extension ToolCall {
         return (node, hierarchy)
     }
 
-    /// `package` argument, or the app on screen. Validated: it goes into device shell commands.
+    /// Explicit package only. Foreground inspection remains available as read-only metadata,
+    /// but must not silently determine which app a tool reads or modifies.
     func package(_ context: DeviceContext) async throws -> String {
-        if let package = try arguments.string("package") {
-            guard package.wholeMatch(of: /[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+/) != nil else {
-                throw ToolInputError("package must be an Android package name such as com.example.app.")
-            }
-            return package
-        }
-        return try await context.foregroundPackage()
+        try AppInput.package(arguments.requiredString("package"))
     }
 }
 

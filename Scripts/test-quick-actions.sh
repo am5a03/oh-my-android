@@ -11,6 +11,7 @@ if [[ $(uname -s) == Darwin ]]; then
 fi
 swiftc -swift-version 6 -warnings-as-errors -parse-as-library ${platform_flags[@]+"${platform_flags[@]}"} \
   Sources/Core/Support.swift \
+  Sources/Core/DeviceOperationLock.swift \
   Sources/Core/Android/Device.swift \
   Sources/Core/Android/AppTarget.swift \
   Sources/Core/Android/AppCommandRunner.swift \
