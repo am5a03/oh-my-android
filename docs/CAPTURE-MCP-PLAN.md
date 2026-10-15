@@ -200,7 +200,8 @@ mode that ends evidence admission while retaining working forwarding until the
 user turns the tunnel off. Otherwise expose physical-iPhone network control only
 as an attended workflow with a visible manual-action state. Do not describe this
 as fully autonomous iPhone capture. The existing WireGuard shutdown crash remains
-a separate release blocker, and the new app-scoped logging still needs hardware proof.
+a separate release blocker. Remaining combined-iPhone and helper-process checks
+are tracked in the [live logging validation](CAPTURE-LOGGING-VALIDATION.md).
 
 ## Implementation checkpoints
 

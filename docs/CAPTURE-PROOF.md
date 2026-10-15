@@ -1,5 +1,10 @@
 # Mobile Capture prototype proof
 
+For the later bounded app-scoped logging tests on Pixel, Android emulator,
+iOS Simulator and physical iPhone, see
+[live logging validation](CAPTURE-LOGGING-VALIDATION.md). That follow-up also
+records the iPhone argument and Android capability-detection fixes.
+
 Implemented for [issue #4](https://github.com/am5a03/oh-my-android/issues/4)
 on `codex/issue-4-unified-capture`. Observed on 14 October 2026, Vancouver time.
 

@@ -8,8 +8,11 @@ controls. Device logs start unchecked. Selecting whole-device logging is an
 explicit choice for one recording. Companion status events have their own count
 and filter; network bodies retain the existing full-body path.
 
-Synthetic automated checks run tonight. **Physical Android, physical iPhone,
-iOS Simulator and visual/keyboard checks are deferred to the next testing session.**
+Synthetic automated checks ran at this implementation checkpoint; physical-device,
+Simulator and visual/keyboard checks were initially deferred. The subsequent
+[live logging validation](CAPTURE-LOGGING-VALIDATION.md) covers Pixel, emulator,
+Simulator, physical-iPhone app logs and the live UI, including two fixes found by
+those tests. Its remaining-acceptance list identifies checks still outstanding.
 The previously observed WireGuard engine crash on Stop remains a separate release
 blocker; these changes do not claim to fix it.
 
@@ -54,7 +57,8 @@ tests and the store integration harness pass. The legacy Python regression suite
 passes 64 tests with one optional native-engine case skipped. No connected-device,
 Simulator or visual test was performed for this checkpoint.
 
-Next-session acceptance checks:
+Full device/UI acceptance checklist (completed subsets are recorded in the live
+validation report):
 
 1. Android: choose the neutral fixture, capture emitted debug/info SDK-style logs
    and a nonce request, relaunch its process, and confirm both launches stay in scope.

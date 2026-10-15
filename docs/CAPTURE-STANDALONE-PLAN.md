@@ -266,9 +266,9 @@ published handoff contract; neither app requires the other's source checkout.
    is optional after these boundaries are established.
 
 Commit each checkpoint with its relevant build/verification results. Keep device
-tests deferred until the user is ready. The existing physical-iPhone WireGuard
-shutdown crash and the unproven hardware logging changes remain release blockers;
-the product split does not resolve them.
+tests coordinated with the user. The existing physical-iPhone WireGuard shutdown
+crash and the remaining [logging acceptance checks](CAPTURE-LOGGING-VALIDATION.md)
+still gate release; the product split does not resolve them.
 
 ## Acceptance checks
 

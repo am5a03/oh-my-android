@@ -23,6 +23,9 @@ public final class ProofActivity extends Activity {
         final String endpoint = value("proof_url", "https://httpbingo.org/anything");
         new Thread(() -> {
             Log.i("CaptureProof", "proof-start nonce=" + nonce);
+            Log.v("CaptureProof", "proof-verbose nonce=" + nonce);
+            Log.d("CaptureProof", "proof-debug nonce=" + nonce + " Unicode=café 東京 🚀");
+            Log.i("CaptureProof", "proof-info nonce=" + nonce);
             HttpURLConnection connection = null;
             try {
                 String safe = nonce.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");

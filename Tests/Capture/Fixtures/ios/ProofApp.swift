@@ -37,6 +37,8 @@ final class ProofApp: UIResponder, UIApplicationDelegate {
         let nonce = environment["CAPTURE_PROOF_NONCE"] ?? UUID().uuidString
         let endpoint = environment["CAPTURE_PROOF_URL"] ?? "https://httpbingo.org/anything"
         logger.notice("proof-start nonce=\(nonce, privacy: .public)")
+        logger.debug("proof-debug nonce=\(nonce, privacy: .public) Unicode=café 東京 🚀")
+        logger.info("proof-info nonce=\(nonce, privacy: .public)")
         do {
             guard let url = URL(string: endpoint), url.scheme == "https" else {
                 throw URLError(.badURL)
