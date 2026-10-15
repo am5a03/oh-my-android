@@ -40,6 +40,7 @@ struct NativeTimelineSnapshot: Sendable {
     let latestSequence: Int64
     let generation: Int64
     let networkDiagnostics: [String: Int]
+    var observedLogEvents: Int? = nil
 }
 
 struct NativeTimelinePage: Sendable {

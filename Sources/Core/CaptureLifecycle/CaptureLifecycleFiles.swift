@@ -3,7 +3,10 @@ import Foundation
 
 enum CaptureLifecycleFiles {
     static func timestamp() -> String {
-        Date().ISO8601Format(.iso8601(timeZone: .gmt, includingFractionalSeconds: true))
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: Date())
     }
 
     static func privateDirectory(_ url: URL) throws {

@@ -13,6 +13,10 @@ nonisolated struct CaptureServiceCommand: Sendable, Equatable {
         Self(executable: simctl, arguments: ["list", "devices", "available", "--json"])
     }
 
+    static func iphoneDevices(devicectl: URL, jsonOutput: URL) -> Self {
+        Self(executable: devicectl, arguments: ["list", "devices", "--timeout", "10", "--json-output", jsonOutput.path, "--quiet"])
+    }
+
     static func androidLogs(adb: URL, serial: String) -> Self {
         Self(executable: adb, arguments: ["-s", serial, "logcat", "-v", "epoch"])
     }
@@ -35,6 +39,9 @@ nonisolated struct CaptureToolConfiguration: Sendable {
     var adbPath: String? = nil
     var simctlPath: String? = nil
     var mitmdumpPath: String? = nil
+    var devicectlPath: String? = nil
+    var idevicesyslogPath: String? = nil
+    var ideviceinfoPath: String? = nil
 }
 
 nonisolated struct NativeCaptureDevice: Codable, Identifiable, Sendable, Equatable {
@@ -69,6 +76,13 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
             "/Applications/mitmproxy.app/Contents/MacOS/mitmdump",
         ])
         var simctl = try resolve(configuration.simctlPath, name: "simctl", candidates: [])
+        var devicectl = try resolve(configuration.devicectlPath, name: "devicectl", candidates: [])
+        let idevicesyslog = try resolve(configuration.idevicesyslogPath, name: "idevicesyslog", candidates: [
+            "/opt/homebrew/bin/idevicesyslog", "/usr/local/bin/idevicesyslog",
+        ])
+        let ideviceinfo = try resolve(configuration.ideviceinfoPath, name: "ideviceinfo", candidates: [
+            "/opt/homebrew/bin/ideviceinfo", "/usr/local/bin/ideviceinfo",
+        ])
         var warnings: [String] = []
         if simctl == nil, FileManager.default.isExecutableFile(atPath: "/usr/bin/xcrun") {
             let result = try await runner.run(URL(fileURLWithPath: "/usr/bin/xcrun"), arguments: ["--find", "simctl"])
@@ -76,10 +90,19 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
                 simctl = try resolve(result.stdout.trimmed, name: "simctl", candidates: [])
             }
         }
+        if devicectl == nil, FileManager.default.isExecutableFile(atPath: "/usr/bin/xcrun") {
+            let result = try await runner.run(URL(fileURLWithPath: "/usr/bin/xcrun"), arguments: ["--find", "devicectl"])
+            if result.isSuccess, !result.stdout.trimmed.isEmpty {
+                devicectl = try resolve(result.stdout.trimmed, name: "devicectl", candidates: [])
+            }
+        }
         var tools: [String: String] = [:]
         if let adb { tools["adb"] = adb.path }
         if let simctl { tools["simctl"] = simctl.path }
         if let mitmdump { tools["mitmdump"] = mitmdump.path }
+        if let devicectl { tools["devicectl"] = devicectl.path }
+        if let idevicesyslog { tools["idevicesyslog"] = idevicesyslog.path }
+        if let ideviceinfo { tools["ideviceinfo"] = ideviceinfo.path }
         var devices: [NativeCaptureDevice] = []
         if let adb {
             let command = CaptureServiceCommand.androidDevices(adb: adb)
@@ -94,6 +117,21 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
                 do { devices += try Self.parseSimulatorDevices(Data(result.stdout.utf8)) }
                 catch { warnings.append("Simulator discovery returned unreadable device information: \(error.localizedDescription)") }
             } else { warnings.append(Self.failure("Simulator discovery", result: result)) }
+        }
+        if let devicectl {
+            // devicectl's JSON file is its supported automation interface. Its console output is not.
+            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("capture-iphone-discovery-\(UUID().uuidString)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+                defer { try? FileManager.default.removeItem(at: temporary) }
+                let jsonOutput = temporary.appendingPathComponent("devices.json")
+                let command = CaptureServiceCommand.iphoneDevices(devicectl: devicectl, jsonOutput: jsonOutput)
+                let result = try await runner.run(command.executable, arguments: command.arguments)
+                if result.isSuccess {
+                    devices += try Self.parseIPhoneDevices(Data(contentsOf: jsonOutput))
+                } else { warnings.append(Self.failure("iPhone discovery", result: result)) }
+            } catch is CancellationError { throw CancellationError() }
+            catch { warnings.append("iPhone discovery returned unreadable device information: \(error.localizedDescription)") }
         }
         var services: [String] = []
         if FileManager.default.isExecutableFile(atPath: "/usr/sbin/networksetup") {
@@ -159,6 +197,56 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
             (response.devices[group] ?? []).filter { $0.isAvailable != false }.map { device in
                 NativeCaptureDevice(id: device.udid, name: device.name ?? device.udid, platform: "simulator", state: (device.state ?? "unknown").lowercased())
             }
+        }
+    }
+
+    static func parseIPhoneDevices(_ data: Data) throws -> [NativeCaptureDevice] {
+        struct Response: Decodable { let result: Result }
+        struct Result: Decodable { let devices: [Device] }
+        struct Device: Decodable {
+            let identifier: String?
+            let hardwareProperties: Hardware?
+            let deviceProperties: Properties?
+            let connectionProperties: Connection?
+        }
+        struct Hardware: Decodable {
+            let deviceType: String?
+            let platform: String?
+            let reality: String?
+            let udid: String?
+            let marketingName: String?
+            let productType: String?
+        }
+        struct Properties: Decodable { let name: String? }
+        struct Connection: Decodable { let pairingState: String?; let tunnelState: String? }
+        func nonempty(_ value: String?) -> String? {
+            guard let value = value?.trimmed, !value.isEmpty else { return nil }
+            return value
+        }
+        let response = try JSONDecoder().decode(Response.self, from: data)
+        return response.result.devices.compactMap { device in
+            guard let hardware = device.hardwareProperties,
+                  hardware.deviceType?.lowercased() == "iphone", hardware.platform?.lowercased() == "ios",
+                  hardware.reality?.lowercased() == "physical" else { return nil }
+            // libimobiledevice collectors address hardware UDIDs; CoreDevice's identifier is different.
+            guard let identifier = nonempty(hardware.udid) ?? nonempty(device.identifier) else { return nil }
+            let model = nonempty(hardware.marketingName) ?? nonempty(hardware.productType) ?? "iPhone"
+            let name = nonempty(device.deviceProperties?.name) ?? model
+            let pairing = device.connectionProperties?.pairingState?.lowercased() ?? "unknown"
+            let tunnel = device.connectionProperties?.tunnelState?.lowercased() ?? "unknown"
+            let state: String
+            if pairing != "paired" {
+                state = pairing == "unknown" ? "unknown" : "needs trust"
+            } else {
+                switch tunnel {
+                case "connected": state = "ready"
+                case "connecting": state = "connecting"
+                case "disconnected": state = "disconnected"
+                case "unavailable": state = "unavailable"
+                default: state = "unknown"
+                }
+            }
+            return NativeCaptureDevice(id: identifier, name: name == model ? name : "\(name) (\(model))", platform: "iphone", state: state)
         }
     }
 

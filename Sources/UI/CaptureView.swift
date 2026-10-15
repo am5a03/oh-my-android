@@ -224,6 +224,7 @@ struct CaptureView: View {
         if store.hasActiveCapture { return "Stop and save the current capture before starting another." }
         guard let device = store.selectedDevice else { return "Choose a connected device to start capturing." }
         if !device.isReady { return "The selected device is not ready. Unlock it, authorize the computer, then refresh devices." }
+        if store.captureNetwork && device.platform == "iphone" { return "iPhone USB logs are ready. Network capture requires WireGuard setup; turn off Network Requests & Responses to record logs." }
         if !store.captureLogs && !store.captureNetwork { return "Select Device Logs, Network Requests & Responses, or both." }
         if store.captureNetwork && device.platform == "simulator" && store.networkService.isEmpty {
             return "Choose the Mac network service used by the Simulator before starting network capture."
@@ -308,7 +309,7 @@ struct CaptureView: View {
                 .frame(maxWidth: 560)
                 Button { Task { await store.refreshDevices() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                 Spacer()
-                Text("Physical iPhone: next phase").font(.caption).foregroundStyle(.secondary)
+                Text("iPhone: USB logs · Network setup next").font(.caption).foregroundStyle(.secondary)
             }
             HStack(spacing: 20) {
                 Toggle("Device logs", isOn: $store.captureLogs)

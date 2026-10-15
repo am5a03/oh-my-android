@@ -6,6 +6,48 @@ import Testing
 /// Local synthetic evidence only; Python is an independent compatibility oracle, never a live collector.
 @Suite
 struct NativeTimelineTests {
+    @Test static func physicalIPhoneLogFormat() throws {
+        let line = "Oct 15 03:45:00.123456 Ad Proof(AdSDK)[431] <Debug>: café request 😀\r\n"
+        let parsed = try #require(IPhoneLogFormat.parse(Data(line.utf8), sessionStartedAt: "2026-10-15T03:00:00.000000Z"))
+        #expect(parsed["timestamp"] as? String == "2026-10-15T03:45:00.123456Z")
+        #expect(parsed["original_timestamp"] as? String == "Oct 15 03:45:00.123456")
+        #expect(parsed["summary"] as? String == "Ad Proof: café request 😀")
+        let detail = try #require(parsed["detail"] as? [String: Any])
+        #expect(detail["raw_line"] as? String == line)
+        #expect(detail["process"] as? String == "Ad Proof")
+        #expect(detail["image"] as? String == "AdSDK")
+        #expect(detail["pid"] as? Int64 == 431)
+        #expect(detail["level"] as? String == "Debug")
+        #expect(detail["timestamp_fraction_digits"] as? Int == 6)
+        #expect(detail["clock_calibrated"] == nil)
+        #expect(parsed["clock_uncertainty_ms"] == nil)
+        let whole = try #require(IPhoneLogFormat.parse(Data("Oct 15 03:45:00 SpringBoard[1] <Notice>: whole seconds".utf8), sessionStartedAt: "2026-10-15T03:00:00Z"))
+        #expect(whole["timestamp"] as? String == "2026-10-15T03:45:00Z")
+        #expect((whole["detail"] as? [String: Any])?["image"] == nil)
+        let shortFraction = try #require(IPhoneLogFormat.parse(Data("Oct  5 03:45:00.12 Proof[1] <Error>: rejected".utf8), sessionStartedAt: "2026-10-05T03:00:00Z"))
+        #expect(shortFraction["timestamp"] as? String == "2026-10-05T03:45:00.12Z")
+    }
+
+    @Test static func physicalIPhoneYearRolloverAndInvalidEvidence() throws {
+        func parse(_ text: String, _ start: String) -> String? {
+            IPhoneLogFormat.parse(Data(text.utf8), sessionStartedAt: start)?["timestamp"] as? String
+        }
+        #expect(parse("Jan  1 00:00:01.000001 Proof[1] <Info>: next year", "2026-12-31T23:59:59Z") == "2027-01-01T00:00:01.000001Z")
+        #expect(parse("Dec 31 23:59:59.999999 Proof[1] <Info>: previous year", "2027-01-01T00:00:01Z") == "2026-12-31T23:59:59.999999Z")
+        #expect(parse("Feb 29 12:00:00.000001 Proof[1] <Info>: leap day", "2024-02-29T11:00:00Z") == "2024-02-29T12:00:00.000001Z")
+        for line in ["Feb 30 12:00:00 Proof[1] <Info>: invalid day", "Oct 15 24:00:00 Proof[1] <Info>: invalid hour",
+                     "Oct 15 12:60:00 Proof[1] <Info>: invalid minute", "Oct 15 12:00:60 Proof[1] <Info>: invalid second",
+                     "Oct 15 12:00:00.1234567 Proof[1] <Info>: unsupported precision", "continuation without a timestamp",
+                     "[connected:fixture-iphone]", "[disconnected:fixture-iphone]"] {
+            #expect(IPhoneLogFormat.parse(Data(line.utf8), sessionStartedAt: "2026-10-15T03:00:00Z") == nil)
+        }
+        #expect(IPhoneLogFormat.parse(Data([0xff]), sessionStartedAt: "2026-10-15T03:00:00Z") == nil)
+        #expect(IPhoneLogFormat.parse(Data("Oct 15 12:00:00 Proof[1] <Info>: no anchor".utf8), sessionStartedAt: "invalid") == nil)
+        #expect(IPhoneLogFormat.isStatusLine(Data("[connected:fixture-iphone]\n".utf8)))
+        #expect(IPhoneLogFormat.isStatusLine(Data("[disconnected:fixture-iphone]".utf8)))
+        #expect(!IPhoneLogFormat.isStatusLine(Data("Oct 15 12:00:00 Proof[1] <Info>: [connected:fixture-iphone]".utf8)))
+    }
+
     @Test static func compatibilityAndRetention() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }

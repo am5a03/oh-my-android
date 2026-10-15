@@ -82,7 +82,7 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
             let requested: Bool? = (supplied["capture_" + source] as? Bool) ?? state.map { $0 != "not_selected" }
             let absent = requested == true ? expected.filter { present[$0] == nil } : []
             missing += absent
-            let observed = source == "network" ? summary.decodedHTTPEvents > 0 : summary.counts[source, default: 0] > 0
+            let observed = source == "network" ? summary.decodedHTTPEvents > 0 : summary.observedLogEvents > 0
             if state == "observed", !observed {
                 sources[source] = absent.isEmpty ? "started" : "failed"
                 warnings.append("\(source): supplied observed status has no corresponding timeline evidence")
@@ -223,6 +223,7 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
 private nonisolated struct TimelineSummary {
     var counts: [String: Int] = [:]
     var decodedHTTPEvents = 0
+    var observedLogEvents = 0
     var tlsErrors = 0
     var certificateRejections = 0
     var requestErrors = 0
@@ -263,6 +264,7 @@ private nonisolated struct TimelineSummary {
         }
         try references.validate(id: id, source: source, path: String(rawRef[..<separator.lowerBound]), line: lineNumber)
         counts[source, default: 0] += 1
+        if source == "logs", kind != "collector_status" { observedLogEvents += 1 }
         if event["clock_uncertainty_ms"] == nil || event["clock_uncertainty_ms"] is NSNull { unknownClockEvents += 1 }
         if ["unparsed_log", "parse_error"].contains(kind) { unparsedRefs.append(rawRef) }
         guard source == "network" else { return }

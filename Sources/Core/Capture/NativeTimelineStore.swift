@@ -311,7 +311,8 @@ actor NativeTimelineStore {
         return NativeTimelineSnapshot(counts: counts, totalCount: counts.values.reduce(0, +),
             latestSequence: try database.scalar("SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='events'),0)"),
             generation: Int64(try database.text("SELECT value FROM metadata WHERE key='generation'") ?? "1") ?? 1,
-            networkDiagnostics: diagnostics)
+            networkDiagnostics: diagnostics,
+            observedLogEvents: Int(try database.scalar("SELECT COUNT(*) FROM events WHERE source='logs' AND kind != 'collector_status'")))
     }
 
     private func filter(_ query: NativeTimelineQuery) -> (String, [NativeTimelineSQLValue]) {

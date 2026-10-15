@@ -3,7 +3,7 @@
 Tracks [issue #4](https://github.com/am5a03/oh-my-android/issues/4).
 
 The **Capture Network & Logs…** menu opens a separate capture window for an Android
-device/emulator or a booted iOS Simulator. Select the device, choose device logs
+device/emulator, a paired physical iPhone, or a booted iOS Simulator. Select the device, choose device logs
 and/or network requests, and click **Start Capture**. Use the device, add markers
 for reproduction steps, then click **Stop & Save**. The result is one ZIP and a
 shared timeline linking log messages and network events to original evidence.
@@ -20,7 +20,11 @@ confirmation. If saving fails, **Retry Save** remains available instead of a
 success confirmation.
 
 This implementation has no company repositories, accounts, endpoint lists, app
-identifiers or analyzers as dependencies. Physical iPhone is a later phase.
+identifiers or analyzers as dependencies. Physical iPhone USB logs use
+libimobiledevice (`brew install libimobiledevice`) and an unlocked phone that
+trusts this Mac. The optional app identifier remains investigation context;
+the USB stream retains logs across processes and app restarts. WireGuard network
+setup is the next physical-iPhone checkpoint.
 
 ## Source build prerequisites
 

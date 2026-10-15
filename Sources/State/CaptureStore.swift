@@ -126,6 +126,7 @@ final class CaptureStore {
     var canStart: Bool {
         !isBusy && !hasActiveCapture && selectedDevice?.isReady == true && (captureLogs || captureNetwork)
             && !(captureNetwork && selectedDevice?.platform == "simulator" && networkService.isEmpty)
+            && !(captureNetwork && selectedDevice?.platform == "iphone")
     }
     // The retained window is chronological; reversing never changes the user's following preference.
     var visibleEvents: [NativeTimelineRow] {

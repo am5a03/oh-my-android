@@ -17,7 +17,16 @@ enum NativeTimelineNormalizer {
     }
 
     static func normalize(source: String, path: String, line: Int64, raw: Data, state: [String: Any]) throws -> [String: Any] {
-        let value = source == "logs" ? logValue(raw) : jsonValue(raw, source: source)
+        let value: [String: Any]
+        if source == "logs", state["platform"] as? String == "iphone", IPhoneLogFormat.isStatusLine(raw) {
+            value = ["kind": "collector_status", "summary": String(decoding: raw, as: UTF8.self),
+                "detail": ["format": "iphone_collector_status", "message": "USB collector connection status; not an observed device log"]]
+        } else if source == "logs", state["platform"] as? String == "iphone",
+           let parsed = IPhoneLogFormat.parse(raw, sessionStartedAt: state["started_at"] as? String ?? "") {
+            value = parsed
+        } else {
+            value = source == "logs" ? logValue(raw) : jsonValue(raw, source: source)
+        }
         let rawTime = value["timestamp"] ?? value["time"] ?? value["timestamp_start"]
         let original = value["original_timestamp"] ?? rawTime
         var parsed = timestamp(rawTime)

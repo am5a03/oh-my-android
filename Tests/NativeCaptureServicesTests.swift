@@ -33,6 +33,34 @@ struct NativeCaptureServicesTests {
         #expect(command.arguments[1] == "id with spaces")
         #expect(command.arguments.suffix(2) == ["--predicate", "process == \"Proof\\\" OR process == \\\"Other\\\\Path\\n\""])
         #expect(!command.arguments.contains("sh"))
+        let jsonOutput = URL(fileURLWithPath: "/private/tmp/capture path/devices.json")
+        #expect(CaptureServiceCommand.iphoneDevices(devicectl: executable, jsonOutput: jsonOutput).arguments ==
+            ["list", "devices", "--timeout", "10", "--json-output", jsonOutput.path, "--quiet"])
+    }
+
+    @Test func physicalIPhoneParserUsesHardwareUDIDAndPreservesAvailability() throws {
+        let data = Data(#"""
+        {"result":{"devices":[
+          {"identifier":"core-ready","hardwareProperties":{"udid":"hardware-ready","deviceType":"iPhone","platform":"iOS","reality":"physical","marketingName":"iPhone Model"},"deviceProperties":{"name":"QA Phone","developerModeStatus":"disabled","ddiServicesAvailable":false},"connectionProperties":{"pairingState":"paired","tunnelState":"connected"}},
+          {"identifier":"core-offline","hardwareProperties":{"udid":"hardware-offline","deviceType":"iPhone","platform":"iOS","reality":"physical","marketingName":"iPhone Model"},"connectionProperties":{"pairingState":"paired","tunnelState":"unavailable"}},
+          {"identifier":"core-unpaired","hardwareProperties":{"udid":"hardware-unpaired","deviceType":"iPhone","platform":"iOS","reality":"physical"},"connectionProperties":{"pairingState":"unpaired","tunnelState":"connected"}},
+          {"identifier":"core-disconnected","hardwareProperties":{"deviceType":"iPhone","platform":"iOS","reality":"physical","productType":"iPhoneFixture,1"},"deviceProperties":{"name":"  "},"connectionProperties":{"pairingState":"paired","tunnelState":"disconnected"}},
+          {"identifier":"core-connecting","hardwareProperties":{"deviceType":"iPhone","platform":"iOS","reality":"physical"},"connectionProperties":{"pairingState":"paired","tunnelState":"connecting"}},
+          {"identifier":"core-unknown","hardwareProperties":{"deviceType":"iPhone","platform":"iOS","reality":"physical"}},
+          {"identifier":"watch","hardwareProperties":{"deviceType":"appleWatch","platform":"watchOS","reality":"physical"},"connectionProperties":{"pairingState":"paired","tunnelState":"connected"}},
+          {"identifier":"simulated","hardwareProperties":{"deviceType":"iPhone","platform":"iOS","reality":"simulated"}},
+          {"hardwareProperties":{"udid":" ","deviceType":"iPhone","platform":"iOS","reality":"physical"}},
+          {"identifier":"incomplete"}
+        ]}}
+        """#.utf8)
+        let devices = try NativeCaptureDiscovery.parseIPhoneDevices(data)
+        #expect(devices.map(\.id) == ["hardware-ready", "hardware-offline", "hardware-unpaired", "core-disconnected", "core-connecting", "core-unknown"])
+        #expect(devices.map(\.state) == ["ready", "unavailable", "needs trust", "disconnected", "connecting", "unknown"])
+        #expect(devices.allSatisfy { $0.platform == "iphone" })
+        #expect(devices.first?.name == "QA Phone (iPhone Model)")
+        #expect(devices[1].name == "iPhone Model")
+        #expect(devices[3].name == "iPhoneFixture,1")
+        #expect(throws: (any Error).self) { try NativeCaptureDiscovery.parseIPhoneDevices(Data(#"{"result":{}}"#.utf8)) }
     }
 
     @Test func toolResolutionRejectsInvalidOverridesAndRelativeSearchPaths() throws {
@@ -52,18 +80,47 @@ struct NativeCaptureServicesTests {
     @Test func discoveryUsesConfiguredToolsWithoutPython() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
-        for name in ["adb", "simctl", "mitmdump"] {
+        for name in ["adb", "simctl", "mitmdump", "devicectl", "idevicesyslog", "ideviceinfo"] {
             let path = fixture.root.appendingPathComponent(name)
             try Data("not executed".utf8).write(to: path)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path.path)
         }
         let discovery = NativeCaptureDiscovery(runner: FixtureShell(), environment: [:], homeDirectory: fixture.root)
         let result = try await discovery.discover(configuration: .init(adbPath: fixture.root.appendingPathComponent("adb").path,
-            simctlPath: fixture.root.appendingPathComponent("simctl").path, mitmdumpPath: fixture.root.appendingPathComponent("mitmdump").path))
-        #expect(result.devices.map(\.id) == ["android-fixture", "simulator-fixture"])
+            simctlPath: fixture.root.appendingPathComponent("simctl").path, mitmdumpPath: fixture.root.appendingPathComponent("mitmdump").path,
+            devicectlPath: fixture.root.appendingPathComponent("devicectl").path,
+            idevicesyslogPath: fixture.root.appendingPathComponent("idevicesyslog").path,
+            ideviceinfoPath: fixture.root.appendingPathComponent("ideviceinfo").path))
+        #expect(result.devices.map(\.id) == ["android-fixture", "simulator-fixture", "iphone-fixture"])
         #expect(result.networkServices == ["Wi-Fi"])
+        #expect(result.tools["devicectl"] == fixture.root.appendingPathComponent("devicectl").path)
+        #expect(result.tools["idevicesyslog"] == fixture.root.appendingPathComponent("idevicesyslog").path)
+        #expect(result.tools["ideviceinfo"] == fixture.root.appendingPathComponent("ideviceinfo").path)
         #expect(result.tools["python"] == nil)
         #expect(result.warnings.isEmpty)
+        let temporaryJSON = try String(contentsOf: fixture.root.appendingPathComponent("discovery-output-path"), encoding: .utf8)
+        #expect(!FileManager.default.fileExists(atPath: temporaryJSON))
+        #expect(!FileManager.default.fileExists(atPath: URL(fileURLWithPath: temporaryJSON).deletingLastPathComponent().path))
+    }
+
+    @Test(arguments: [false, true])
+    func iPhoneDiscoveryFailureKeepsAndroidAndSimulatorDevices(_ malformedJSON: Bool) async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        for name in ["adb", "simctl", "devicectl"] {
+            let path = fixture.root.appendingPathComponent(name)
+            try Data("not executed".utf8).write(to: path)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path.path)
+        }
+        let discovery = NativeCaptureDiscovery(runner: FixtureShell(iphoneFailure: !malformedJSON, malformedIPhoneJSON: malformedJSON),
+            environment: [:], homeDirectory: fixture.root)
+        let result = try await discovery.discover(configuration: .init(adbPath: fixture.root.appendingPathComponent("adb").path,
+            simctlPath: fixture.root.appendingPathComponent("simctl").path, devicectlPath: fixture.root.appendingPathComponent("devicectl").path))
+        #expect(result.devices.map(\.platform) == ["android", "simulator"])
+        #expect(result.warnings.count == 1)
+        #expect(result.warnings.first?.hasPrefix("iPhone discovery") == true)
+        let temporaryJSON = try String(contentsOf: fixture.root.appendingPathComponent("discovery-output-path"), encoding: .utf8)
+        #expect(!FileManager.default.fileExists(atPath: URL(fileURLWithPath: temporaryJSON).deletingLastPathComponent().path))
     }
 
     @Test func bundledToolsWorkWithoutDeveloperPathsAndOverridesRemainExplicit() throws {
@@ -273,6 +330,9 @@ struct NativeCaptureServicesTests {
 }
 
 private struct FixtureShell: ShellRunning {
+    var iphoneFailure = false
+    var malformedIPhoneJSON = false
+
     func run(_ executable: URL, arguments: [String]) async throws -> ShellResult {
         let output: String
         if executable.lastPathComponent == "adb" {
@@ -281,6 +341,18 @@ private struct FixtureShell: ShellRunning {
         } else if executable.lastPathComponent == "simctl" {
             guard arguments == ["list", "devices", "available", "--json"] else { throw AppError("Unexpected simctl command") }
             output = #"{"devices":{"runtime":[{"udid":"simulator-fixture","name":"Fixture Simulator","state":"Booted"}]}}"#
+        } else if executable.lastPathComponent == "devicectl" {
+            guard arguments.count == 7, arguments.prefix(5) == ["list", "devices", "--timeout", "10", "--json-output"], arguments.last == "--quiet" else {
+                throw AppError("Unexpected devicectl command")
+            }
+            let json = URL(fileURLWithPath: arguments[5])
+            let attributes = try FileManager.default.attributesOfItem(atPath: json.deletingLastPathComponent().path)
+            #expect((attributes[.posixPermissions] as? Int).map { $0 & 0o777 } == 0o700)
+            try Data(json.path.utf8).write(to: executable.deletingLastPathComponent().appendingPathComponent("discovery-output-path"))
+            if iphoneFailure { return ShellResult(stdout: "", stderr: "Synthetic CoreDevice service unavailable", exitCode: 1) }
+            let supportedJSON = #"{"result":{"devices":[{"identifier":"core-fixture","hardwareProperties":{"udid":"iphone-fixture","deviceType":"iPhone","platform":"iOS","reality":"physical","marketingName":"Fixture iPhone"},"connectionProperties":{"pairingState":"paired","tunnelState":"connected"}}]}}"#
+            try Data((malformedIPhoneJSON ? "unreadable JSON" : supportedJSON).utf8).write(to: json)
+            output = "Console table intentionally differs from supported JSON output."
         } else if executable.path == "/usr/sbin/networksetup" {
             guard arguments == ["-listallnetworkservices"] else { throw AppError("Unexpected networksetup command") }
             output = "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\n"

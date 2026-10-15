@@ -71,6 +71,19 @@ extension NativeCaptureHost {
     }
 
     static func calibration(request: NativeCaptureRequest, tools: [String: String]) async throws -> CaptureHostState {
+        if request.platform == "iphone" {
+            guard let tool = tools["ideviceinfo"] else {
+                return ["offset_ms": .null, "uncertainty_ms": .null, "method": .string("iPhone clock calibration unavailable; USB log dates use UTC")]
+            }
+            let before = Date().timeIntervalSince1970
+            let result = try await ProcessShellRunner(timeout: .seconds(10)).run(URL(fileURLWithPath: tool), arguments: ["--udid", request.device_id, "--key", "TimeIntervalSince1970"])
+            let after = Date().timeIntervalSince1970
+            guard result.isSuccess, let seconds = Double(result.stdout.trimmed), seconds.isFinite else {
+                return ["offset_ms": .null, "uncertainty_ms": .null, "method": .string("iPhone clock calibration unavailable; USB log dates use UTC")]
+            }
+            return ["offset_ms": .number(((before + after) / 2 - seconds) * 1000),
+                "uncertainty_ms": .number((after - before) * 500 + 1), "method": .string("Paired iPhone TimeIntervalSince1970; midpoint with round-trip uncertainty, USB log dates in UTC")]
+        }
         guard request.platform == "android", let adb = tools["adb"] else {
             return ["offset_ms": .null, "uncertainty_ms": .null, "method": .string("Simulator log timestamps are host-related; clock alignment not measured")]
         }
@@ -85,6 +98,13 @@ extension NativeCaptureHost {
     }
 
     static func logs(request: NativeCaptureRequest, tools: [String: String], directory: URL, state: inout CaptureHostState) async throws -> [String] {
+        if request.platform == "iphone" {
+            guard let logger = tools["idevicesyslog"] else { throw AppError("iPhone device logs require libimobiledevice. Install it with brew install libimobiledevice, then Refresh.") }
+            state["context"] = .object(["log_scope": .object(["mode": .string("iphone_usb_device_logs"), "target_app": request.target_app.map(CaptureStateValue.string) ?? .null,
+                "service": .string("os_trace_relay"), "timezone": .string("UTC")])])
+            state.warn("iPhone USB logs include multiple processes. Private OS log fields can be redacted; the optional app identifier is investigation context.")
+            return [logger, "--udid", request.device_id, "--exit", "--no-colors"]
+        }
         if request.platform == "android" {
             guard let adb = tools["adb"] else { throw AppError("ADB is required for Android logs.") }
             if request.target_app?.isEmpty == false { state.warn("Android target app is recorded as context. Raw device logs include all processes so app restarts and SDK processes are retained.") }

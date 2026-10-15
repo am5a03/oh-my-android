@@ -4,9 +4,12 @@ import Foundation
 enum NativeCaptureHost {
     static func start(requestURL: URL, executable: URL) async throws -> CaptureHostEnvelope {
         let request = try CaptureLifecycleFiles.read(NativeCaptureRequest.self, at: requestURL)
-        guard ["android", "simulator"].contains(request.platform), !request.device_id.isEmpty,
+        guard ["android", "simulator", "iphone"].contains(request.platform), !request.device_id.isEmpty,
               request.capture_logs || request.capture_network, request.output_root.hasPrefix("/") else {
-            throw AppError("Select an explicit Android device or Simulator, capture sources and an absolute output directory.")
+            throw AppError("Select an explicit Android device, iPhone or Simulator, capture sources and an absolute output directory.")
+        }
+        guard request.platform != "iphone" || !request.capture_network else {
+            throw AppError("Physical iPhone network capture needs its WireGuard setup. Device logs can be captured over USB.")
         }
         let root = URL(fileURLWithPath: request.output_root).standardizedFileURL
         try CaptureLifecycleFiles.privateDirectory(root)
@@ -205,9 +208,10 @@ enum NativeCaptureHost {
     }
 
     private static func prepare(directory: URL, request: NativeCaptureRequest, state: inout CaptureHostState, workers: inout [String: CaptureOwnedProcess], executable: URL) async throws {
-        let discovery = try await NativeCaptureDiscovery().discover(configuration: .init(adbPath: request.adb_path, simctlPath: request.simctl_path, mitmdumpPath: request.mitmdump_path))
+        let discovery = try await NativeCaptureDiscovery().discover(configuration: .init(adbPath: request.adb_path, simctlPath: request.simctl_path, mitmdumpPath: request.mitmdump_path,
+            devicectlPath: request.devicectl_path, idevicesyslogPath: request.idevicesyslog_path, ideviceinfoPath: request.ideviceinfo_path))
         guard let device = discovery.devices.first(where: { $0.id == request.device_id && $0.platform == request.platform }), ["ready", "booted"].contains(device.state) else {
-            throw AppError("Selected device is not ready. Unlock/authorize Android USB debugging or boot the selected Simulator.")
+            throw AppError("Selected device is not ready. Unlock and trust this Mac on iPhone, authorize Android USB debugging, or boot the selected Simulator.")
         }
         state["device_name"] = .string(request.device_name ?? device.name)
         state["clock_calibration"] = .object(["logs": .object(try await calibration(request: request, tools: discovery.tools)),
@@ -251,7 +255,8 @@ enum NativeCaptureHost {
             var sources = state["sources"]?.object ?? [:]; sources["network"] = .string("started"); state["sources"] = .object(sources)
         }
         if let logCommand {
-            workers["logs"] = try startWorker(directory: directory, name: "logs", command: logCommand, executable: executable)
+            workers["logs"] = try startWorker(directory: directory, name: "logs", command: logCommand, executable: executable,
+                environment: request.platform == "iphone" ? ["TZ": "UTC", "LC_ALL": "C"] : [:])
             try await Task.sleep(for: .milliseconds(600))
             guard workers["logs"]?.isRunning == true else { throw AppError("The device log collector exited during startup. Inspect runtime/logs.stderr.") }
             var sources = state["sources"]?.object ?? [:]; sources["logs"] = .string("started"); state["sources"] = .object(sources)
@@ -308,7 +313,7 @@ enum NativeCaptureHost {
         state["network_diagnostics"] = .counts(snapshot.networkDiagnostics)
         var sources = state["sources"]?.object ?? [:]
         for source in ["logs", "network"] {
-            let observed = source == "network" ? snapshot.networkDiagnostics["decoded_http_events", default: 0] > 0 : snapshot.counts["logs", default: 0] > 0
+            let observed = source == "network" ? snapshot.networkDiagnostics["decoded_http_events", default: 0] > 0 : (snapshot.observedLogEvents ?? snapshot.counts["logs", default: 0]) > 0
             if ["started", "tls_failed"].contains(sources[source]?.text ?? "") {
                 if observed { sources[source] = .string("observed") }
                 else if source == "network", snapshot.networkDiagnostics["tls_errors", default: 0] > 0 { sources[source] = .string("tls_failed") }

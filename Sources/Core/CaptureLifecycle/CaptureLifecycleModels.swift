@@ -64,6 +64,11 @@ struct NativeCaptureRequest: Codable, Sendable {
     var proxy_helper_path: String?
     var runtime_directory: String?
     var lock_directory: String?
+    var devicectl_path: String?
+    var idevicesyslog_path: String?
+    var ideviceinfo_path: String?
+    var iphone_endpoint_host: String?
+    var iphone_tunnel_directory: String?
 }
 
 struct CaptureHostEnvelope: Codable, Sendable {

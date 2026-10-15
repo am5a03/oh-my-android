@@ -7,8 +7,15 @@ struct CaptureDevice: Decodable, Identifiable, Sendable {
     let state: String
 
     var selectionID: String { platform + ":" + id }
-    var isReady: Bool { ["ready", "booted", "device"].contains(state.lowercased()) }
-    var platformName: String { platform == "simulator" ? "iOS Simulator" : "Android" }
+    var isReady: Bool { ["android", "simulator", "iphone"].contains(platform) && ["ready", "booted", "device"].contains(state.lowercased()) }
+    var platformName: String {
+        switch platform {
+        case "simulator": "iOS Simulator"
+        case "iphone": "iPhone"
+        case "android": "Android"
+        default: "Unsupported device"
+        }
+    }
 }
 
 /// JSON is retained in event details so unknown SDK-specific fields remain inspectable.
@@ -154,7 +161,7 @@ struct CaptureSession: Decodable, Sendable {
     func merging(_ snapshot: NativeTimelineSnapshot) -> Self {
         var sources = sources
         for name in ["logs", "network"] where ["started", "tls_failed"].contains(sources[name] ?? "") {
-            if name == "logs", snapshot.counts[name, default: 0] > 0 { sources[name] = "observed" }
+            if name == "logs", (snapshot.observedLogEvents ?? snapshot.counts[name, default: 0]) > 0 { sources[name] = "observed" }
             if name == "network" {
                 if snapshot.networkDiagnostics["decoded_http_events", default: 0] > 0 { sources[name] = "observed" }
                 else if snapshot.networkDiagnostics["tls_errors", default: 0] > 0 { sources[name] = "tls_failed" }
