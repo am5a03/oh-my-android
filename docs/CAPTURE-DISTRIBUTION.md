@@ -5,6 +5,12 @@ and evidence export use native Swift components. The remaining Python interprete
 is embedded inside the isolated mitmproxy network engine. Testers do not install
 Python, Homebrew, mitmproxy, Android Studio or the Android SDK for Android capture.
 iOS Simulator users still need Xcode and an installed Simulator runtime.
+Physical iPhone users need Xcode's device tools for discovery, and USB log
+capture additionally needs `libimobiledevice` installed once on the Mac
+(`brew install libimobiledevice`). That collector is not bundled in this
+checkpoint. Network capture uses the bundled engine plus WireGuard on the
+iPhone; its private profile and the public CA are configured through
+**Set Up iPhone Capture…**. See [the iPhone workflow](CAPTURE.md).
 
 The reviewed dependency lock currently supports **Apple Silicon / arm64 only**:
 
@@ -162,7 +168,9 @@ DMG, following [Apple's direct-distribution workflow](https://developer.apple.co
 
 CA trust/device authorization remain one-time human setup. Private CA keys stay
 in the user's application-support directory and never enter the app bundle or
-export ZIP. Physical iPhone capture remains a separate phase.
+export ZIP. For physical iPhone, follow **Set Up iPhone Capture…** after selecting
+the paired phone. Start on Mac before enabling its tunnel, and turn the phone
+tunnel off before confirming **Stop & Save**. Logs and network share the same ZIP.
 
 ## Build a complete local artifact
 
@@ -211,7 +219,10 @@ authorize USB debugging and use an engineer-prepared app that trusts the public
 capture CA. Certificate installation/trust remains a one-time device step. For
 Simulator they install Xcode, boot a simulator, select the Mac network service
 and authorize the temporary proxy change. Start/Stop and export then work from
-the UI. Physical iPhone capture is a later phase.
+the UI. Physical iPhone users install the extra USB collector described above,
+pair the phone with the Mac, and use the WireGuard setup sheet. The v1 tunnel
+captures IPv4 over reachable Wi-Fi; IPv6 may bypass capture, and pinning can
+prevent HTTPS decoding. Phone tunnel toggles and certificate trust remain manual.
 
 The complete development packaging path was exercised for this checkpoint:
 optimized app/helper build, pinned cache verification, inside-out development

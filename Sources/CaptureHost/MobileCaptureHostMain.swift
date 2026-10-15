@@ -6,7 +6,7 @@ struct MobileCaptureHostMain {
         let arguments = Array(CommandLine.arguments.dropFirst())
         var directory: URL?
         do {
-            guard let action = arguments.first, ["start", "stop", "status", "_supervise", "_worker"].contains(action), arguments.count == 3 else {
+            guard let action = arguments.first, ["start", "stop", "stop-iphone-tunnel-off", "status", "_supervise", "_worker"].contains(action), arguments.count == 3 else {
                 throw AppError("Expected start --request, stop/status --session, or an internal supervisor/worker command.")
             }
             let option = arguments[1]
@@ -20,7 +20,7 @@ struct MobileCaptureHostMain {
             else if option == "--session" {
                 directory = url
                 if action == "_supervise" { try await NativeCaptureHost.supervise(directory: url, executable: executable); return }
-                if action == "stop" { result = try await NativeCaptureHost.stop(directory: url) }
+                if action == "stop" || action == "stop-iphone-tunnel-off" { result = try await NativeCaptureHost.stop(directory: url, phoneTunnelOffConfirmed: action == "stop-iphone-tunnel-off") }
                 else if action == "status" { result = try NativeCaptureHost.status(directory: url) }
                 else { throw AppError("Unsupported capture command.") }
             } else { throw AppError("Unsupported capture command arguments.") }

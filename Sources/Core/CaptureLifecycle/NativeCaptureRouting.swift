@@ -7,6 +7,18 @@ extension NativeCaptureHost {
             guard let adb = tools["adb"] else { throw AppError("ADB is required for Android capture.") }
             try await AndroidCaptureRouting(adb: URL(fileURLWithPath: adb), device: request.device_id).claim(sessionDirectory: directory, port: port)
             state.warn("Android captures apps that honor the system HTTP proxy. CA trust/network security configuration is required for HTTPS; pinning, QUIC and proxy bypass can leave gaps.")
+        } else if request.platform == "iphone" {
+            let journal: CaptureHostState = ["platform": .string("iphone"), "device_id": .string(request.device_id),
+                "port": .number(Double(port)), "requires_phone_disconnect": .bool(true), "restored": .bool(false)]
+            try CaptureLifecycleFiles.write(journal, at: directory.appendingPathComponent("runtime/routing.json"))
+            var context = state["context"]?.object ?? [:]
+            context["iphone_network"] = .object(["mode": .string("wireguard"), "endpoint_host": request.iphone_endpoint_host.map(CaptureStateValue.string) ?? .null,
+                "port": .number(Double(port)), "ip_coverage": .string("IPv4 only; IPv6 may bypass capture"),
+                "attribution": .string("Traffic from this private tunnel peer; USB device identity and time proximity are context, not proof of app ownership"),
+                "stop_confirmation": .string("User must turn off the iPhone tunnel before the server stops")])
+            state["context"] = .object(context)
+            state.warn("Turn on Mobile Capture in WireGuard on the iPhone after recording starts. Turn it off before Stop & Save. This Mac cannot toggle or verify the phone's tunnel state automatically.")
+            state.warn("iPhone network capture covers IPv4 from the imported tunnel. IPv6 may bypass it, pinned HTTPS can remain unreadable, and unrelated phone apps may be included. Install and fully trust this companion's CA for HTTPS bodies.")
         } else {
             guard let service = request.network_service, !service.isEmpty else { throw AppError("Select an explicit Mac network service for Simulator capture.") }
             let helper = try proxyHelper(request)
@@ -35,6 +47,20 @@ extension NativeCaptureHost {
         guard FileManager.default.fileExists(atPath: path.path) else { return }
         var journal = try CaptureLifecycleFiles.read(CaptureHostState.self, at: path)
         if journal["restored"] == .bool(true) { return }
+        if journal.text("platform") == "iphone" {
+            let confirmationURL = directory.appendingPathComponent("runtime/iphone-tunnel-off-confirmation.json")
+            guard let confirmation = try? CaptureLifecycleFiles.read(CaptureHostState.self, at: confirmationURL),
+                  confirmation["confirmed_off"] == .bool(true) else {
+                throw AppError("Turn off the capture tunnel in WireGuard on the iPhone, then confirm Tunnel Is Off. The server stays available until you confirm.")
+            }
+            journal["phone_tunnel_off_confirmed"] = .bool(true)
+            journal["phone_tunnel_off_confirmed_at"] = confirmation["confirmed_at"]
+            journal["restored"] = .bool(true)
+            journal["restored_at"] = .string(CaptureLifecycleFiles.timestamp())
+            journal["restoration_basis"] = .string("User confirmed the iPhone tunnel is off; no automatic phone verification")
+            try CaptureLifecycleFiles.write(journal, at: path)
+            return
+        }
         if journal.text("platform") == "android" {
             guard let adb = journal["tools"]?.object.text("adb"), let device = journal.text("device_id") else { throw AppError("The Android recovery journal is missing its tool/device identity.") }
             guard let executable = try NativeCaptureDiscovery().resolve(adb, name: "adb", candidates: []) else { throw AppError("Reconnect the original ADB executable to recover routing.") }

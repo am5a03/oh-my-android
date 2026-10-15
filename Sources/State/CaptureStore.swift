@@ -27,6 +27,7 @@ private struct CaptureStartRequest: Encodable {
     let mitmdumpPath: String?
     let proxyHelperPath: String?
     let runtimeDirectory: String?
+    let iphoneEndpointHost: String?
 }
 
 /// The app talks to a compiled sibling helper. JSON carries session metadata, never captured bodies.
@@ -84,7 +85,9 @@ final class CaptureStore {
     private(set) var presentationHint: String?
     private(set) var followLatest = true
     var wrapLines = false
-    var selectedDeviceID = ""
+    var selectedDeviceID = "" {
+        didSet { if selectedDeviceID != oldValue { loadIPhoneSetup() } }
+    }
     var captureLogs = true
     var captureNetwork = true
     var targetApp = ""
@@ -92,6 +95,12 @@ final class CaptureStore {
     var trustSimulatorCA = false
     var adbPath = ""
     var mitmdumpPath = ""
+    var iphoneEndpointHost = IPhoneCaptureSetup.defaultEndpointHost() ?? "" {
+        didSet {
+            if iphoneEndpointHost != oldValue { iphoneTunnelConfiguration = nil }
+        }
+    }
+    private(set) var iphoneTunnelConfiguration: IPhoneTunnelConfiguration?
     var search = "" { didSet { if search != oldValue { scheduleTimelineRefresh() } } }
     var sourceFilter = "all" { didSet { if sourceFilter != oldValue { scheduleTimelineRefresh() } } }
     var newestFirst = false
@@ -126,7 +135,8 @@ final class CaptureStore {
     var canStart: Bool {
         !isBusy && !hasActiveCapture && selectedDevice?.isReady == true && (captureLogs || captureNetwork)
             && !(captureNetwork && selectedDevice?.platform == "simulator" && networkService.isEmpty)
-            && !(captureNetwork && selectedDevice?.platform == "iphone")
+            && !(captureNetwork && selectedDevice?.platform == "iphone" && iphoneTunnelConfiguration == nil)
+            && !(captureLogs && selectedDevice?.platform == "iphone" && toolPath("idevicesyslog") == nil)
     }
     // The retained window is chronological; reversing never changes the user's following preference.
     var visibleEvents: [NativeTimelineRow] {
@@ -152,6 +162,30 @@ final class CaptureStore {
 
     func toolPath(_ name: String) -> String? { tools[name] ?? nil }
 
+    func loadIPhoneSetup() {
+        guard !hasActiveCapture else { return }
+        iphoneTunnelConfiguration = nil
+        guard let device = selectedDevice, device.platform == "iphone" else { return }
+        do {
+            if let existing = try IPhoneCaptureSetup.readExisting(deviceID: device.id) {
+                iphoneEndpointHost = existing.endpointHost
+                iphoneTunnelConfiguration = existing
+            } else if iphoneEndpointHost.isEmpty {
+                iphoneEndpointHost = IPhoneCaptureSetup.defaultEndpointHost() ?? ""
+            }
+        } catch { recordFailure(error) }
+    }
+
+    @discardableResult
+    func prepareIPhoneSetup() -> Bool {
+        guard let device = selectedDevice, device.platform == "iphone" else { return false }
+        if hasActiveCapture { return iphoneTunnelConfiguration != nil }
+        do {
+            iphoneTunnelConfiguration = try IPhoneCaptureSetup.prepare(deviceID: device.id, endpointHost: iphoneEndpointHost, evidenceRoot: outputRoot)
+            return true
+        } catch { recordFailure(error); return false }
+    }
+
     func refreshDevices() async {
         guard !isBusy, !hasActiveCapture else { return }
         isBusy = true
@@ -166,6 +200,7 @@ final class CaptureStore {
             didDiscover = true
             if !networkServices.contains(networkService) { networkService = "" }
             if !discovery.warnings.isEmpty { error = discovery.warnings.joined(separator: "\n") }
+            loadIPhoneSetup()
         } catch { recordFailure(error) }
     }
 
@@ -193,6 +228,10 @@ final class CaptureStore {
             await refreshTimeline(mode: .latest)
             guard let session, URL(fileURLWithPath: session.directory).standardizedFileURL == directory.standardizedFileURL else { return }
             selectedDeviceID = session.platform + ":" + session.deviceId
+            if session.platform == "iphone" {
+                iphoneTunnelConfiguration = try? IPhoneCaptureSetup.readExisting(deviceID: session.deviceId)
+                if let configuration = iphoneTunnelConfiguration { iphoneEndpointHost = configuration.endpointHost; iphoneTunnelConfiguration = configuration }
+            }
             if session.isActive, client.isAvailable {
                 let status: CaptureUpdate = try await client.call(["status", "--session", session.directory])
                 let warnings = status.session.warnings.filter { !session.warnings.contains($0) }
@@ -219,7 +258,8 @@ final class CaptureStore {
                 trustSimulatorCa: device.platform == "simulator" && trustSimulatorCA,
                 adbPath: nonempty(adbPath), mitmdumpPath: nonempty(mitmdumpPath),
                 proxyHelperPath: Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("mobile-capture-proxy").path,
-                runtimeDirectory: Bundle.main.resourceURL?.appendingPathComponent("CaptureRuntime").path)
+                runtimeDirectory: Bundle.main.resourceURL?.appendingPathComponent("CaptureRuntime").path,
+                iphoneEndpointHost: device.platform == "iphone" ? iphoneTunnelConfiguration?.endpointHost : nil)
             let requestURL = outputRoot.appendingPathComponent(".start-\(UUID().uuidString).json")
             let encoder = JSONEncoder()
             encoder.keyEncodingStrategy = .convertToSnakeCase
@@ -251,6 +291,15 @@ final class CaptureStore {
 
     func stop() async {
         guard !isBusy, let current = session, current.canFinalize else { return }
+        let needsPhoneConfirmation = current.platform == "iphone" && current.sources["network"] != "not_selected" && current.routingRestored != true
+        if needsPhoneConfirmation {
+            let alert = NSAlert()
+            alert.messageText = "Turn Off the iPhone Capture Tunnel"
+            alert.informativeText = "In WireGuard on iPhone, turn off Mobile Capture first. This Mac cannot toggle or verify the phone's tunnel. Once it is off, confirm below to stop the server and save the ZIP."
+            alert.addButton(withTitle: "Tunnel Is Off — Stop & Save")
+            alert.addButton(withTitle: "Keep Recording")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
         pollingTask?.cancel()
         pollingTask = nil
         isBusy = true
@@ -259,7 +308,7 @@ final class CaptureStore {
         while isAddingMarker { try? await Task.sleep(for: .milliseconds(20)) }
         error = nil
         do {
-            let update: CaptureUpdate = try await client.call(["stop", "--session", current.directory], timeout: .seconds(120))
+            let update: CaptureUpdate = try await client.call([needsPhoneConfirmation ? "stop-iphone-tunnel-off" : "stop", "--session", current.directory], timeout: .seconds(120))
             session = update.session
             await refreshTimeline(mode: .presentation)
         } catch { recordFailure(error) }

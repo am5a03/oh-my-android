@@ -23,8 +23,32 @@ This implementation has no company repositories, accounts, endpoint lists, app
 identifiers or analyzers as dependencies. Physical iPhone USB logs use
 libimobiledevice (`brew install libimobiledevice`) and an unlocked phone that
 trusts this Mac. The optional app identifier remains investigation context;
-the USB stream retains logs across processes and app restarts. WireGuard network
-setup is the next physical-iPhone checkpoint.
+the USB stream retains logs across processes and app restarts.
+
+For physical iPhone network capture, select the phone and choose **Set Up iPhone
+Capture…**. Keep the phone and Mac on the same reachable Wi-Fi network. Scan the
+private profile QR code in WireGuard and name it **Mobile Capture**. Start Capture
+on the Mac, then turn the tunnel on in WireGuard on the phone. For first-time
+HTTPS setup, open **http://mitm.it** in Safari with the tunnel on, download the
+Apple certificate profile, install it under Settings → General → VPN & Device
+Management, then enable full trust under General → About → Certificate Trust
+Settings. The setup sheet keeps these steps available during recording.
+
+Turn the phone tunnel **off before Stop & Save**. The Mac asks for confirmation;
+it cannot toggle or independently verify the phone’s VPN state. Until confirmation,
+the server remains available, including if USB logs disconnect. An interrupted
+collector produces a partial package with retained evidence. Stop records the
+user-confirmed tunnel state in the package context.
+
+Logs and network events use the same timeline and evidence ZIP. iPhone log dates
+are interpreted in UTC with an explicitly inferred year, and the device clock is
+sampled over the paired USB connection with its uncertainty recorded. Tunnel keys
+and profiles live privately outside sessions and are excluded from evidence ZIPs.
+Profiles retain their keys across sessions; after the Mac’s Wi-Fi address changes,
+update the address and reimport the profile. This v1 tunnel captures IPv4;
+IPv6 may bypass it. Pinning can prevent HTTPS decoding, and other phone apps can
+be included. The Mac must remain reachable from the phone; a LAN endpoint does
+not provide capture over cellular.
 
 ## Source build prerequisites
 

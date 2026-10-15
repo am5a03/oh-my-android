@@ -87,10 +87,53 @@ if kind == "simctl" {
     if arguments.first == "keychain" { exit(0) }
     fail("Unexpected simctl command")
 }
+if kind == "devicectl" {
+    guard arguments.prefix(2) == ["list", "devices"], let outputOption = arguments.firstIndex(of: "--json-output"),
+          arguments.indices.contains(outputOption + 1) else { fail("Unexpected devicectl command") }
+    let value: [String: Any] = ["result": ["devices": [[
+        "identifier": "core-device-identifier-is-not-hardware-udid",
+        "hardwareProperties": ["deviceType": "iPhone", "platform": "iOS", "reality": "physical", "udid": "fixture-iphone", "marketingName": "Fixture iPhone"],
+        "deviceProperties": ["name": "Fixture iPhone"],
+        "connectionProperties": ["pairingState": "paired", "tunnelState": "connected"]
+    ]]]]
+    try! JSONSerialization.data(withJSONObject: value).write(to: URL(fileURLWithPath: arguments[outputOption + 1]))
+    exit(0)
+}
+if kind == "ideviceinfo" {
+    guard arguments == ["--udid", "fixture-iphone", "--key", "TimeIntervalSince1970"] else { fail("Unexpected iPhone clock command") }
+    text(String(Date().timeIntervalSince1970)); exit(0)
+}
+if kind == "idevicesyslog" {
+    guard arguments == ["--udid", "fixture-iphone", "--exit", "--no-colors"] else { fail("Unexpected iPhone USB log selection") }
+    guard ProcessInfo.processInfo.environment["TZ"] == "UTC", ProcessInfo.processInfo.environment["LC_ALL"] == "C" else { fail("iPhone log clock must use UTC and C locale") }
+    text("[connected:fixture-iphone]")
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "MMM dd HH:mm:ss"
+    if readJSON("faults.json")["iphone_status_only"] as? Bool != true {
+        text("\(formatter.string(from: Date())).123456 FixturePhone(AdsSDK)[321] <Info>: native USB iPhone request")
+    }
+    if readJSON("faults.json")["iphone_logs_disconnect"] as? Bool == true {
+        usleep(2_000_000); text("[disconnected:fixture-iphone]")
+        try! Data("disconnected".utf8).write(to: root.appendingPathComponent("logs-disconnected"))
+        exit(0)
+    }
+    waitWithSignal { try! Data("logs stopped".utf8).write(to: root.appendingPathComponent("logs-stopped")) }
+}
 if kind == "mitmdump" {
     if readJSON("faults.json")["engine_start_fails"] as? Bool == true { fail("Synthetic engine startup failure") }
     let session = URL(fileURLWithPath: ProcessInfo.processInfo.environment["CAPTURE_SESSION_DIR"]!)
     let network = session.appendingPathComponent("network")
+    if let modeOption = arguments.firstIndex(of: "--mode"), arguments.indices.contains(modeOption + 1), arguments[modeOption + 1].hasPrefix("wireguard:") {
+        guard arguments.contains("--quiet"), let bindOption = arguments.firstIndex(of: "--listen-host"),
+              arguments.indices.contains(bindOption + 1), arguments[bindOption + 1] == "0.0.0.0" else { fail("iPhone network engine must bind the reachable endpoint quietly") }
+        let mode = arguments[modeOption + 1]
+        guard mode.hasSuffix("@51820") else { fail("Unexpected iPhone tunnel port") }
+        let keyPath = String(mode.dropFirst("wireguard:".count).dropLast("@51820".count))
+        let keys = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: keyPath))) as! [String: Any]
+        guard keys["server_key"] is String, keys["client_key"] is String else { fail("Missing private WireGuard keys") }
+        writeJSON(["arguments": arguments, "key_path": keyPath], "iphone-network-invocation.json")
+    }
     let ca = arguments.first(where: { $0.hasPrefix("confdir=") })!.dropFirst(8)
     try! Data("PUBLIC FIXTURE CERTIFICATE".utf8).write(to: URL(fileURLWithPath: String(ca)).appendingPathComponent("mitmproxy-ca-cert.pem"))
     try! Data([0, 1, 2, 255]).write(to: network.appendingPathComponent("capture.mitm"))
@@ -193,4 +236,4 @@ let package = Package(name: "NativeCaptureLifecycle", platforms: [.macOS(.v26)],
 SWIFT
 # These paths point only to compiled synthetic tools; no connected devices or real proxies.
 CAPTURE_TEST_HOST="$work/mobile-capture-host" CAPTURE_TEST_TOOL="$work/fixture-tool" \
-  swift test --package-path "$work" --scratch-path "$work/build" --disable-sandbox
+  swift test --package-path "$work" --scratch-path "$work/build" --disable-sandbox "$@"

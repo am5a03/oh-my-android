@@ -8,9 +8,6 @@ enum NativeCaptureHost {
               request.capture_logs || request.capture_network, request.output_root.hasPrefix("/") else {
             throw AppError("Select an explicit Android device, iPhone or Simulator, capture sources and an absolute output directory.")
         }
-        guard request.platform != "iphone" || !request.capture_network else {
-            throw AppError("Physical iPhone network capture needs its WireGuard setup. Device logs can be captured over USB.")
-        }
         let root = URL(fileURLWithPath: request.output_root).standardizedFileURL
         try CaptureLifecycleFiles.privateDirectory(root)
         let identifier = UUID().uuidString.lowercased()
@@ -72,8 +69,17 @@ enum NativeCaptureHost {
         return envelope(state)
     }
 
-    static func stop(directory: URL) async throws -> CaptureHostEnvelope {
+    static func stop(directory: URL, phoneTunnelOffConfirmed: Bool = false) async throws -> CaptureHostEnvelope {
         var state = try load(directory)
+        let confirmation = directory.appendingPathComponent("runtime/iphone-tunnel-off-confirmation.json")
+        if phoneTunnelOffConfirmed, state.text("platform") == "iphone", state["capture_network"] == .bool(true) {
+            try CaptureLifecycleFiles.write(["confirmed_off": CaptureStateValue.bool(true), "confirmed_at": .string(CaptureLifecycleFiles.timestamp())], at: confirmation)
+        }
+        let routing = directory.appendingPathComponent("runtime/routing.json")
+        if state.text("platform") == "iphone", FileManager.default.fileExists(atPath: routing.path),
+           state["routing_restored"] != .bool(true), !FileManager.default.fileExists(atPath: confirmation.path) {
+            return CaptureHostEnvelope(session: state, error: "Turn off Mobile Capture in WireGuard on the iPhone, then confirm Tunnel Is Off to stop and save. The capture server is still running.")
+        }
         let previousRecoveryAttempt = state.text("recovery_attempt")
         if state.isCaptureActive, CaptureHostSocket.request(directory: directory, action: "stop") {
             let deadline = ContinuousClock.now + .seconds(95)
@@ -220,7 +226,15 @@ enum NativeCaptureHost {
         try save(state, directory)
         if request.capture_network {
             guard let mitmdump = discovery.tools["mitmdump"] else { throw AppError("mitmdump is required for network capture. Install mitmproxy or choose its executable.") }
-            let port = try freePort()
+            let tunnel: IPhoneTunnelConfiguration?
+            if request.platform == "iphone" {
+                guard let endpoint = request.iphone_endpoint_host else { throw AppError("Set up the iPhone capture tunnel with this Mac's reachable Wi-Fi address first.") }
+                let tunnelRoot = request.iphone_tunnel_directory.map { URL(fileURLWithPath: $0).standardizedFileURL }
+                if tunnelRoot != nil, request.iphone_tunnel_directory?.hasPrefix("/") != true { throw AppError("The private iPhone tunnel directory must be absolute.") }
+                tunnel = try IPhoneCaptureSetup.prepare(deviceID: request.device_id, endpointHost: endpoint, rootDirectory: tunnelRoot,
+                    evidenceRoot: URL(fileURLWithPath: request.output_root))
+            } else { tunnel = nil }
+            let port = try tunnel?.port ?? freePort()
             let caPath = request.ca_directory ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Capture Companion/mitmproxy").path
             guard caPath.hasPrefix("/") else { throw AppError("The capture CA store must be an absolute private directory.") }
             let ca = URL(fileURLWithPath: caPath)
@@ -230,7 +244,9 @@ enum NativeCaptureHost {
             let runtime = URL(fileURLWithPath: runtimePath)
             let addon = runtime.appendingPathComponent("network_addon.py")
             guard FileManager.default.fileExists(atPath: addon.path) else { throw AppError("The bundled network capture addon is missing.") }
-            let command = [mitmdump, "--listen-host", "127.0.0.1", "--listen-port", String(port), "--mode", "regular", "--set", "confdir=\(ca.path)", "--set", "connection_strategy=lazy", "--set", "store_streamed_bodies=true", "-w", directory.appendingPathComponent("network/capture.mitm").path, "-s", addon.path]
+            let mode = tunnel.map { "wireguard:\($0.serverConfiguration.path)@\($0.port)" } ?? "regular"
+            // WireGuard startup otherwise logs a complete private client profile.
+            let command = [mitmdump, "--quiet", "--listen-host", tunnel == nil ? "127.0.0.1" : "0.0.0.0", "--listen-port", String(port), "--mode", mode, "--set", "confdir=\(ca.path)", "--set", "connection_strategy=lazy", "--set", "store_streamed_bodies=true", "-w", directory.appendingPathComponent("network/capture.mitm").path, "-s", addon.path]
             workers["network"] = try startWorker(directory: directory, name: "network", command: command, executable: executable, environment: ["CAPTURE_SESSION_DIR": directory.path])
             let ready = directory.appendingPathComponent("network/ready.json")
             let deadline = ContinuousClock.now + .seconds(25)
@@ -349,6 +365,14 @@ enum NativeCaptureHost {
         }
         state["sources"] = .object(sources)
         state["collector_status"] = .object(collectorStatus)
+        if state.text("platform") == "iphone",
+           let confirmation = try? CaptureLifecycleFiles.read(CaptureHostState.self, at: directory.appendingPathComponent("runtime/iphone-tunnel-off-confirmation.json")) {
+            var context = state["context"]?.object ?? [:]
+            context["iphone_tunnel_stop"] = .object(["phone_tunnel_off_confirmed_by_user": confirmation["confirmed_off"] ?? .bool(false),
+                "confirmed_at": confirmation["confirmed_at"] ?? .null,
+                "basis": .string("User confirmation; this Mac cannot verify the phone's VPN state")])
+            state["context"] = .object(context)
+        }
         let failedSource = sources.values.contains { ["failed", "interrupted"].contains($0.text ?? "") }
         let pending = !(incomplete["flow_ids"]?.array.isEmpty ?? true) || !(incomplete["missing_bodies"]?.array.isEmpty ?? true)
         let partial = interrupted || failedSource || state["routing_restored"] != .bool(true) || pending || !missing.isEmpty || tlsErrors > 0 || requestErrors > 0

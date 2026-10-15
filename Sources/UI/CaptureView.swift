@@ -5,6 +5,7 @@ struct CaptureView: View {
     @Bindable var store: CaptureStore
     @State private var showRuntimeSettings = false
     @State private var showCaptureWarnings = false
+    @State private var showIPhoneSetup = false
     @State private var savedNoticeHeight: CGFloat = 0
     @State private var headerContentHeight: CGFloat = 0
     @State private var recoveryNoticeHeight: CGFloat = 32
@@ -35,6 +36,11 @@ struct CaptureView: View {
         }
         .frame(minWidth: 960, minHeight: 680)
         .onChange(of: store.session?.id) { showCaptureWarnings = false }
+        .sheet(isPresented: $showIPhoneSetup) {
+            if let configuration = store.iphoneTunnelConfiguration {
+                IPhoneCaptureSetupView(configuration: configuration, isRecording: store.session?.isActive == true)
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button { Task { await store.openSession() } } label: {
@@ -224,7 +230,8 @@ struct CaptureView: View {
         if store.hasActiveCapture { return "Stop and save the current capture before starting another." }
         guard let device = store.selectedDevice else { return "Choose a connected device to start capturing." }
         if !device.isReady { return "The selected device is not ready. Unlock it, authorize the computer, then refresh devices." }
-        if store.captureNetwork && device.platform == "iphone" { return "iPhone USB logs are ready. Network capture requires WireGuard setup; turn off Network Requests & Responses to record logs." }
+        if device.platform == "iphone", store.captureLogs, store.toolPath("idevicesyslog") == nil { return "Install libimobiledevice for USB iPhone logs, then Refresh. Network capture can run without device logs." }
+        if store.captureNetwork && device.platform == "iphone" && store.iphoneTunnelConfiguration == nil { return "Choose Set Up iPhone Capture to prepare the private WireGuard tunnel, then start recording." }
         if !store.captureLogs && !store.captureNetwork { return "Select Device Logs, Network Requests & Responses, or both." }
         if store.captureNetwork && device.platform == "simulator" && store.networkService.isEmpty {
             return "Choose the Mac network service used by the Simulator before starting network capture."
@@ -309,8 +316,9 @@ struct CaptureView: View {
                 .frame(maxWidth: 560)
                 Button { Task { await store.refreshDevices() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                 Spacer()
-                Text("iPhone: USB logs · Network setup next").font(.caption).foregroundStyle(.secondary)
+                Text("Android · iPhone · iOS Simulator").font(.caption).foregroundStyle(.secondary)
             }
+            .disabled(store.hasActiveCapture || store.isBusy)
             HStack(spacing: 20) {
                 Toggle("Device logs", isOn: $store.captureLogs)
                 Toggle("Network requests & responses", isOn: $store.captureNetwork)
@@ -320,11 +328,36 @@ struct CaptureView: View {
                     .help("On Simulator, limits logs to the installed app’s process across restarts. On Android, records investigation context while retaining all device logs.")
                 Spacer()
             }
-            Text(store.selectedDevice?.platform == "simulator"
+            .disabled(store.hasActiveCapture || store.isBusy)
+            Text(store.selectedDevice?.platform == "iphone"
+                 ? "iPhone logs use USB. Network traffic uses the private WireGuard tunnel over Wi-Fi. The optional app identifier is investigation context; other apps can be included."
+                 : store.selectedDevice?.platform == "simulator"
                  ? "Enter an installed app’s bundle identifier to focus Simulator logs. An empty field captures all processes. Network capture can include other apps; some SDK traffic may remain unreadable."
                  : "Android retains all device logs; app context is metadata. Network capture can include other apps; some SDK traffic may remain unreadable.")
                 .font(.caption).foregroundStyle(.secondary)
-            if store.captureNetwork, store.selectedDevice?.platform == "simulator" {
+            if store.selectedDevice?.platform == "iphone" {
+                if store.captureLogs, store.toolPath("idevicesyslog") == nil {
+                    Text("USB logs require libimobiledevice (brew install libimobiledevice). Install it once, unlock and trust this Mac on iPhone, then Refresh.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if store.captureNetwork {
+                    HStack(spacing: 12) {
+                        TextField("Mac Wi-Fi address", text: $store.iphoneEndpointHost)
+                            .textFieldStyle(.roundedBorder).frame(maxWidth: 230)
+                            .disabled(store.hasActiveCapture || store.isBusy)
+                            .help("A Mac LAN address reachable from the iPhone's Wi-Fi network. Update and reimport the profile if it changes.")
+                        Button("Set Up iPhone Capture…", systemImage: "qrcode") {
+                            if store.prepareIPhoneSetup() { showIPhoneSetup = true }
+                        }
+                        .disabled(store.isBusy)
+                        Spacer()
+                    }
+                    Text(store.session?.isActive == true
+                         ? "Recording on Mac. Turn on Mobile Capture in WireGuard on iPhone. Turn it off before Stop & Save. For first-time HTTPS setup, open http://mitm.it in Safari and install and fully trust the capture CA."
+                         : "Set up WireGuard and the capture CA once. Start Capture on Mac, then turn the tunnel on in WireGuard on iPhone. IPv4 is captured; IPv6 may bypass it.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            } else if store.captureNetwork, store.selectedDevice?.platform == "simulator" {
                 HStack(spacing: 16) {
                     Picker("Mac network service", selection: $store.networkService) {
                         Text("Choose service…").tag("")
@@ -334,6 +367,7 @@ struct CaptureView: View {
                     Toggle("Trust capture CA in selected Simulator", isOn: $store.trustSimulatorCA)
                     Spacer()
                 }
+                .disabled(store.hasActiveCapture || store.isBusy)
                 Text("Simulator capture temporarily changes this Mac service’s proxy and can include unrelated Mac or Simulator traffic. The CA checkbox authorizes importing the public capture certificate into the selected Simulator.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else if store.captureNetwork, store.selectedDevice?.platform == "android" {
@@ -344,9 +378,9 @@ struct CaptureView: View {
                 runtimeSettings.padding(.top, 6)
             }
             .font(.caption)
+            .disabled(store.hasActiveCapture || store.isBusy)
         }
         .padding(16)
-        .disabled(store.hasActiveCapture || store.isBusy)
         .background(.bar)
     }
 

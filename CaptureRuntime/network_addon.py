@@ -27,6 +27,8 @@ class CaptureAddon:
         flow_id = getattr(flow, "id", None)
         request = getattr(flow, "request", None)
         payload = {"flow_id": flow_id}
+        if flow is not None:
+            payload["client_address"] = getattr(getattr(flow, "client_conn", None), "peername", None)
         if request:
             payload.update(method=request.method, url=request.pretty_url)
         payload.update(detail or {})

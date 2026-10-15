@@ -5,6 +5,195 @@ import Testing
 
 @Suite("Native capture host lifecycle")
 struct NativeCaptureLifecycleTests {
+    @Test func physicalIPhoneUSBLogsStopWithoutTunnelConfirmation() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let request = try fixture.request(platform: "iphone", captureNetwork: false)
+        let started = try await fixture.call(["start", "--request", request.path])
+        let active = try #require(started.session)
+        #expect(started.error == nil)
+        #expect(active.text("phase") == "recording")
+        #expect(NativeTimelineNormalizer.timestamp(active.text("started_at")) != nil)
+        let directory = URL(fileURLWithPath: try #require(active.text("directory")))
+        try await fixture.waitForPhoneLogs(directory)
+        let snapshot = try await NativeTimelineStore(sessionDirectory: directory).refresh()
+        #expect(snapshot.counts["logs"] == 2) // Retain transport notices with raw references.
+        #expect(snapshot.observedLogEvents == 1) // A notice does not prove a device log was observed.
+        #expect(snapshot.counts["network", default: 0] == 0)
+        let result = try await fixture.call(["stop", "--session", directory.path])
+        let session = try #require(result.session)
+        #expect(result.error == nil)
+        #expect(session["routing_restored"] == .bool(true))
+        #expect(session["sources"]?.object["logs"] == .string("observed"))
+        #expect(session["sources"]?.object["network"] == .string("not_selected"))
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("logs-stopped").path))
+        let archive = URL(fileURLWithPath: try #require(session.text("package_path")))
+        let exported = try await fixture.extract(archive)
+        let timeline = try fixture.events(exported.appendingPathComponent("timeline/events.jsonl"))
+        let log = try #require(timeline.first { $0["source"] as? String == "logs" && $0["kind"] as? String == "log" })
+        let detail = try #require(log["detail"] as? [String: Any])
+        #expect(detail["format"] as? String == "iphone_idevicesyslog_utc")
+        #expect(detail["pid"] as? Int == 321)
+        #expect(detail["process"] as? String == "FixturePhone")
+        #expect(detail["clock_calibrated"] as? Bool == true)
+        #expect(detail["timestamp_basis"] as? String == "source_timestamp")
+        #expect(log["original_timestamp"] as? String != nil)
+        #expect(log["raw_ref"] as? String == "logs/device.log#L2")
+        #expect(timeline.count == 2)
+        #expect(timeline.filter { $0["kind"] as? String == "collector_status" }.count == 1)
+    }
+
+    @Test func physicalIPhoneConnectionNoticeAloneDoesNotProveObservedLogs() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeJSON(["iphone_status_only": true], "faults.json")
+        let request = try fixture.request(platform: "iphone", captureNetwork: false)
+        let started = try await fixture.call(["start", "--request", request.path])
+        let directory = URL(fileURLWithPath: try #require(started.session?.text("directory")))
+        try await fixture.waitForPhoneLogs(directory, expectedMessage: false)
+        let stopped = try await fixture.call(["stop", "--session", directory.path])
+        let session = try #require(stopped.session)
+        #expect(stopped.error == nil)
+        #expect(session.text("phase") == "partial")
+        #expect(session["sources"]?.object["logs"] != .string("observed"))
+        #expect(session["completeness"]?.object["sources_without_observed_evidence"]?.array.contains(.string("logs")) == true)
+        #expect(FileManager.default.fileExists(atPath: try #require(session.text("package_path"))))
+        let snapshot = try await NativeTimelineStore(sessionDirectory: directory).refresh()
+        #expect(snapshot.counts["logs"] == 1)
+        #expect(snapshot.observedLogEvents == 0)
+    }
+
+    @Test func physicalIPhoneTunnelStopRequiresConfirmationAndExportsCombinedEvidence() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let request = try fixture.request(platform: "iphone")
+        let started = try await fixture.call(["start", "--request", request.path])
+        let active = try #require(started.session)
+        #expect(started.error == nil)
+        #expect(active.text("phase") == "recording")
+        let directory = URL(fileURLWithPath: try #require(active.text("directory")))
+        try await fixture.waitForPhoneLogs(directory)
+        let journalURL = directory.appendingPathComponent("runtime/routing.json")
+        let journal = try CaptureLifecycleFiles.read(CaptureHostState.self, at: journalURL)
+        #expect(journal.text("platform") == "iphone")
+        #expect(journal["requires_phone_disconnect"] == .bool(true))
+        #expect(journal["phone_tunnel_off_confirmed"] != .bool(true))
+        let invocation = try fixture.json("iphone-network-invocation.json")
+        let keyPath = try #require(invocation["key_path"] as? String)
+        #expect(keyPath.hasPrefix(fixture.root.appendingPathComponent("iphone-private").path + "/"))
+        #expect(!keyPath.hasPrefix(directory.path + "/"))
+        let keys = try CaptureLifecycleFiles.read(CaptureHostState.self, at: URL(fileURLWithPath: keyPath))
+        let secrets = try [#require(keys.text("server_key")), #require(keys.text("client_key"))]
+        let blocked = try await fixture.call(["stop", "--session", directory.path])
+        #expect(blocked.error != nil)
+        #expect(blocked.session?.text("package_path") == nil)
+        #expect(blocked.session?["routing_restored"] != .bool(true))
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-running").path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-stopped").path))
+        let notConfirmed = try CaptureLifecycleFiles.read(CaptureHostState.self, at: journalURL)
+        #expect(notConfirmed["phone_tunnel_off_confirmed"] != .bool(true))
+        let stopped = try await fixture.call(["stop-iphone-tunnel-off", "--session", directory.path])
+        let session = try #require(stopped.session)
+        #expect(stopped.error == nil)
+        #expect(session["routing_restored"] == .bool(true))
+        #expect(session["sources"]?.object["logs"] == .string("observed"))
+        #expect(session["sources"]?.object["network"] == .string("observed"))
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-stopped").path))
+        let confirmed = try CaptureLifecycleFiles.read(CaptureHostState.self, at: journalURL)
+        #expect(confirmed["phone_tunnel_off_confirmed"] == .bool(true))
+        #expect(confirmed["restored"] == .bool(true))
+        let archive = URL(fileURLWithPath: try #require(session.text("package_path")))
+        let exported = try await fixture.extract(archive)
+        let timeline = try fixture.events(exported.appendingPathComponent("timeline/events.jsonl"))
+        #expect(timeline.filter { $0["source"] as? String == "logs" && $0["kind"] as? String == "log" }.count == 1)
+        #expect(timeline.filter { $0["kind"] as? String == "collector_status" }.count == 1)
+        #expect(timeline.filter { $0["source"] as? String == "network" }.count == 2)
+        #expect(timeline.contains { ($0["detail"] as? [String: Any])?["request_body"] != nil })
+        #expect(timeline.contains { ($0["detail"] as? [String: Any])?["response_body"] != nil })
+        #expect(try Data(contentsOf: exported.appendingPathComponent("logs/device.log")) == Data(contentsOf: directory.appendingPathComponent("logs/device.log")))
+        #expect(try Data(contentsOf: exported.appendingPathComponent("network/events.jsonl")) == Data(contentsOf: directory.appendingPathComponent("network/events.jsonl")))
+        let files = try #require(FileManager.default.enumerator(at: exported, includingPropertiesForKeys: [.isRegularFileKey])?.allObjects as? [URL])
+        for file in files where try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+            let relative = String(file.path.dropFirst(exported.path.count + 1))
+            #expect(!relative.hasPrefix("runtime/"))
+            #expect(file.pathExtension != "conf")
+            #expect(file.lastPathComponent != URL(fileURLWithPath: keyPath).lastPathComponent)
+            let data = try Data(contentsOf: file)
+            for secret in secrets { #expect(data.range(of: Data(secret.utf8)) == nil) }
+        }
+        let originalZIP = try Data(contentsOf: archive)
+        let repeated = try await fixture.call(["stop", "--session", directory.path])
+        #expect(repeated.error == nil)
+        #expect(repeated.session?.text("stopped_at") == session.text("stopped_at"))
+        #expect(try Data(contentsOf: archive) == originalZIP)
+    }
+
+    @Test func physicalIPhoneEngineStartupFailureFinalizesWithoutPhoneConfirmation() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeJSON(["engine_start_fails": true], "faults.json")
+        let request = try fixture.request(platform: "iphone")
+        let failed = try await fixture.call(["start", "--request", request.path])
+        let session = try #require(failed.session)
+        #expect(failed.error?.contains("Synthetic engine startup failure") == true)
+        #expect(session.text("phase") == "failed")
+        #expect(session["routing_restored"] == .bool(true))
+        #expect(session["completeness"]?.object["startup_failed"] == .bool(true))
+        #expect(FileManager.default.fileExists(atPath: try #require(session.text("package_path"))))
+        #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-running").path))
+        let directory = URL(fileURLWithPath: try #require(session.text("directory")))
+        let stopped = try await fixture.call(["stop", "--session", directory.path])
+        #expect(stopped.session?.text("phase") == "failed")
+        #expect(stopped.error?.contains("Synthetic engine startup failure") == true)
+        #expect(stopped.session?.text("package_path") == session.text("package_path"))
+    }
+
+    @Test func physicalIPhoneUSBDisconnectRetainsPartialLogsPackage() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeJSON(["iphone_logs_disconnect": true], "faults.json")
+        let request = try fixture.request(platform: "iphone", captureNetwork: false)
+        let started = try await fixture.call(["start", "--request", request.path])
+        let directory = URL(fileURLWithPath: try #require(started.session?.text("directory")))
+        try await LifecycleFixture.wait { !(try NativeCaptureHost.load(directory)).isCaptureActive }
+        let state = try NativeCaptureHost.load(directory)
+        #expect(state.text("phase") == "partial")
+        #expect(state["routing_restored"] == .bool(true))
+        #expect(state["completeness"]?.object["interrupted"] == .bool(true))
+        #expect(state["sources"]?.object["logs"] == .string("interrupted"))
+        #expect(FileManager.default.fileExists(atPath: try #require(state.text("package_path"))))
+        let snapshot = try await NativeTimelineStore(sessionDirectory: directory).refresh()
+        #expect(snapshot.counts["logs"] == 3)
+        #expect(snapshot.observedLogEvents == 1)
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("logs-disconnected").path))
+    }
+
+    @Test func physicalIPhoneUSBDisconnectDoesNotKillAnUnconfirmedPhoneTunnel() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeJSON(["iphone_logs_disconnect": true], "faults.json")
+        let request = try fixture.request(platform: "iphone")
+        let started = try await fixture.call(["start", "--request", request.path])
+        #expect(started.error == nil)
+        let directory = URL(fileURLWithPath: try #require(started.session?.text("directory")))
+        try await LifecycleFixture.wait {
+            let state = try NativeCaptureHost.load(directory)
+            return state.text("phase") == "stopping" && state["routing_restored"] == .bool(false)
+        }
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-running").path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-stopped").path))
+        #expect(try NativeCaptureHost.load(directory).text("package_path") == nil)
+        let stopped = try await fixture.call(["stop-iphone-tunnel-off", "--session", directory.path])
+        let session = try #require(stopped.session)
+        #expect(stopped.error == nil)
+        #expect(session.text("phase") == "partial")
+        #expect(session["routing_restored"] == .bool(true))
+        #expect(session["completeness"]?.object["interrupted"] == .bool(true))
+        #expect(session["sources"]?.object["logs"] == .string("interrupted"))
+        #expect(FileManager.default.fileExists(atPath: try #require(session.text("package_path"))))
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-stopped").path))
+    }
+
     @Test(arguments: ["android", "simulator"])
     func capturesAndExportsWithoutPythonCoordinator(_ platform: String) async throws {
         let fixture = try LifecycleFixture()
@@ -314,16 +503,18 @@ private struct LifecycleFixture {
         let tool = URL(fileURLWithPath: try #require(environment["CAPTURE_TEST_TOOL"]))
         root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("native-lifecycle-\(UUID().uuidString)")
         try CaptureLifecycleFiles.privateDirectory(root)
-        for name in ["adb", "simctl", "mitmdump", "mobile-capture-proxy", "legacy-controller"] { try FileManager.default.copyItem(at: tool, to: root.appendingPathComponent(name)) }
+        for name in ["adb", "simctl", "devicectl", "idevicesyslog", "ideviceinfo", "mitmdump", "mobile-capture-proxy", "legacy-controller"] { try FileManager.default.copyItem(at: tool, to: root.appendingPathComponent(name)) }
         try CaptureLifecycleFiles.privateDirectory(root.appendingPathComponent("runtime-source"))
         try Data("# synthetic engine does not load this file\n".utf8).write(to: root.appendingPathComponent("runtime-source/network_addon.py"))
     }
 
-    func request(platform: String) throws -> URL {
-        let request = NativeCaptureRequest(platform: platform, device_id: platform == "android" ? "fixture-device" : "fixture-simulator", device_name: "Fixture", capture_logs: true, capture_network: true,
+    func request(platform: String, captureNetwork: Bool = true) throws -> URL {
+        let request = NativeCaptureRequest(platform: platform, device_id: platform == "android" ? "fixture-device" : platform == "iphone" ? "fixture-iphone" : "fixture-simulator", device_name: "Fixture", capture_logs: true, capture_network: captureNetwork,
             output_root: root.appendingPathComponent("sessions").path, target_app: platform == "simulator" ? "dev.mobilecapture.fixture" : nil, network_service: "Fixture Wi-Fi", trust_simulator_ca: false,
             adb_path: root.appendingPathComponent("adb").path, simctl_path: root.appendingPathComponent("simctl").path, mitmdump_path: root.appendingPathComponent("mitmdump").path,
-            ca_directory: root.appendingPathComponent("ca").path, proxy_helper_path: root.appendingPathComponent("mobile-capture-proxy").path, runtime_directory: root.appendingPathComponent("runtime-source").path, lock_directory: root.appendingPathComponent("lock").path)
+            ca_directory: root.appendingPathComponent("ca").path, proxy_helper_path: root.appendingPathComponent("mobile-capture-proxy").path, runtime_directory: root.appendingPathComponent("runtime-source").path, lock_directory: root.appendingPathComponent("lock").path,
+            devicectl_path: root.appendingPathComponent("devicectl").path, idevicesyslog_path: root.appendingPathComponent("idevicesyslog").path, ideviceinfo_path: root.appendingPathComponent("ideviceinfo").path,
+            iphone_endpoint_host: "192.0.2.10", iphone_tunnel_directory: root.appendingPathComponent("iphone-private").path)
         let path = root.appendingPathComponent("request.json")
         try CaptureLifecycleFiles.write(request, at: path)
         return path
@@ -342,6 +533,24 @@ private struct LifecycleFixture {
     }
     func json(_ name: String) throws -> [String: Any] { try #require(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent(name))) as? [String: Any]) }
 
+    func extract(_ archive: URL) async throws -> URL {
+        let destination = root.appendingPathComponent("extracted-\(UUID().uuidString)")
+        let result = try await ProcessShellRunner().run(URL(fileURLWithPath: "/usr/bin/ditto"), arguments: ["-x", "-k", archive.path, destination.path])
+        try #require(result.isSuccess)
+        return destination
+    }
+
+    func events(_ path: URL) throws -> [[String: Any]] {
+        try Data(contentsOf: path).split(separator: 10).map { try #require(JSONSerialization.jsonObject(with: Data($0)) as? [String: Any]) }
+    }
+
+    func waitForPhoneLogs(_ directory: URL, expectedMessage: Bool = true) async throws {
+        let expected = expectedMessage ? "native USB iPhone request" : "[connected:fixture-iphone]"
+        try await Self.wait {
+            (try? String(contentsOf: directory.appendingPathComponent("logs/device.log"), encoding: .utf8).contains(expected)) == true
+        }
+    }
+
     func legacyState(_ directory: URL) -> CaptureHostState {
         ["id": .string("legacy-fixture"), "directory": .string(directory.path), "platform": .string("android"), "device_id": .string("fixture-device"), "device_name": .string("Fixture"),
          "started_at": .string(CaptureLifecycleFiles.timestamp()), "phase": .string("recording"), "warnings": .array([]), "sources": .object(["logs": .string("started"), "network": .string("started")]), "routing_restored": .null]
@@ -352,7 +561,9 @@ private struct LifecycleFixture {
         let sessions = root.appendingPathComponent("sessions")
         if let names = try? FileManager.default.contentsOfDirectory(at: sessions, includingPropertiesForKeys: nil) {
             for directory in names where FileManager.default.fileExists(atPath: directory.appendingPathComponent("session.json").path) {
-                let process = Process(); process.executableURL = host; process.arguments = ["stop", "--session", directory.path]
+                let process = Process(); process.executableURL = host
+                let state = try? NativeCaptureHost.load(directory)
+                process.arguments = [state?.text("platform") == "iphone" ? "stop-iphone-tunnel-off" : "stop", "--session", directory.path]
                 process.standardInput = FileHandle.nullDevice; process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.nullDevice
                 if (try? process.run()) != nil { process.waitUntilExit() }
             }
