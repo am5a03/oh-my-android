@@ -1,0 +1,370 @@
+import Darwin
+import Foundation
+import Testing
+@testable import NativeCaptureLifecycle
+
+@Suite("Native capture host lifecycle")
+struct NativeCaptureLifecycleTests {
+    @Test(arguments: ["android", "simulator"])
+    func capturesAndExportsWithoutPythonCoordinator(_ platform: String) async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let request = try fixture.request(platform: platform)
+        let start = try await fixture.call(["start", "--request", request.path])
+        let active = try #require(start.session)
+        #expect(start.error == nil)
+        #expect(active.text("phase") == "recording")
+        #expect(active.text("coordinator") == "native")
+        let directory = URL(fileURLWithPath: try #require(active.text("directory")))
+        let snapshot = try await NativeTimelineStore(sessionDirectory: directory).refresh()
+        #expect(snapshot.counts["logs", default: 0] > 0)
+        #expect(snapshot.networkDiagnostics["decoded_http_events"] == 2)
+        let stopped = try await fixture.call(["stop", "--session", directory.path])
+        let session = try #require(stopped.session)
+        #expect(stopped.error == nil)
+        #expect(session.text("phase") == "saved")
+        #expect(session["routing_restored"] == .bool(true))
+        #expect(session["sources"]?.object["logs"] == .string("observed"))
+        #expect(session["sources"]?.object["network"] == .string("observed"))
+        #expect(FileManager.default.fileExists(atPath: try #require(session.text("package_path"))))
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-stopped").path))
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("logs-stopped").path))
+        if platform == "android" {
+            let routing = try fixture.json("routing.json")
+            #expect((routing["proxy"] as? [String: String])?.isEmpty == true)
+            #expect((routing["reverse"] as? [String: String])?.isEmpty == true)
+            #expect(routing["cache_cleared"] as? Bool == true)
+            #expect(routing["clear_engine_alive"] as? Bool == true)
+        } else {
+            let routing = try fixture.json("mac-proxy.json")
+            #expect(routing["enabled"] as? Bool == false)
+            #expect(routing["configuration_present"] as? Bool == false)
+            #expect((routing["configuration"] as? [String: String])?.isEmpty == true)
+            #expect(try fixture.json("restore-result.json")["engine_alive"] as? Bool == true)
+            #expect(session["context"]?.object["log_scope"]?.object.text("executable") == "Fixture App")
+        }
+        let first = try Data(contentsOf: directory.appendingPathComponent("capture-package.zip"))
+        let repeatStop = try await fixture.call(["stop", "--session", directory.path])
+        #expect(repeatStop.session?.text("stopped_at") == session.text("stopped_at"))
+        #expect(try Data(contentsOf: directory.appendingPathComponent("capture-package.zip")) == first)
+    }
+
+    @Test func failedRestoreKeepsProxyRunningAndRetryRestores() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let request = try fixture.request(platform: "simulator")
+        let started = try await fixture.call(["start", "--request", request.path])
+        let directory = URL(fileURLWithPath: try #require(started.session?.text("directory")))
+        try fixture.writeJSON(["restore_fails": true], "faults.json")
+        let blocked = try await fixture.call(["stop", "--session", directory.path])
+        #expect(blocked.error != nil)
+        #expect(blocked.session?["routing_restored"] == .bool(false))
+        #expect(blocked.session?.text("phase") == "stopping")
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-running").path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-stopped").path))
+        try fixture.writeJSON([:], "faults.json")
+        let recovered = try await fixture.call(["stop", "--session", directory.path])
+        #expect(recovered.error == nil)
+        #expect(recovered.session?["routing_restored"] == .bool(true))
+        #expect(recovered.session?.text("phase") == "saved")
+    }
+
+    @Test func startupFailureProducesRecoverablePackageWithoutRoutingMutation() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeJSON(["engine_start_fails": true], "faults.json")
+        let request = try fixture.request(platform: "android")
+        let result = try await fixture.call(["start", "--request", request.path])
+        let session = try #require(result.session)
+        #expect(result.error?.contains("Synthetic engine startup failure") == true)
+        #expect(session.text("phase") == "failed")
+        #expect(session["routing_restored"] == .bool(true))
+        #expect(session["completeness"]?.object["startup_failed"] == .bool(true))
+        #expect(FileManager.default.fileExists(atPath: try #require(session.text("package_path"))))
+        #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("routing.json").path))
+    }
+
+    @Test func androidCachedProxyRetryUsesDurableEmptyTransition() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let request = try fixture.request(platform: "android")
+        let started = try await fixture.call(["start", "--request", request.path])
+        let directory = URL(fileURLWithPath: try #require(started.session?.text("directory")))
+        try fixture.writeJSON(["clear_ack": false], "faults.json")
+        let blocked = try await fixture.call(["stop", "--session", directory.path])
+        #expect(blocked.error != nil)
+        #expect(blocked.session?["routing_restored"] == .bool(false))
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-running").path))
+        try fixture.writeJSON([:], "faults.json")
+        let result = try await fixture.call(["stop", "--session", directory.path])
+        #expect(result.error == nil)
+        #expect(result.session?["routing_restored"] == .bool(true))
+        let journal = try CaptureLifecycleFiles.read(AndroidCaptureRoutingJournal.self, at: directory.appendingPathComponent("runtime/routing.json"))
+        #expect(journal.runtime_proxy_clear_empty_attempted == true)
+        #expect(journal.runtime_proxy_clear_acknowledged == true)
+        #expect(journal.restored)
+    }
+
+    @Test func externalAndroidProxyChangesArePreservedUntilResolved() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let request = try fixture.request(platform: "android")
+        let started = try await fixture.call(["start", "--request", request.path])
+        let directory = URL(fileURLWithPath: try #require(started.session?.text("directory")))
+        var routing = try fixture.json("routing.json")
+        var proxy = try #require(routing["proxy"] as? [String: String])
+        proxy["global_http_proxy_host"] = "external.invalid"
+        routing["proxy"] = proxy
+        try fixture.writeJSON(routing, "routing.json")
+        let blocked = try await fixture.call(["stop", "--session", directory.path])
+        #expect(blocked.error != nil)
+        #expect((try fixture.json("routing.json")["proxy"] as? [String: String])?["global_http_proxy_host"] == "external.invalid")
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-running").path))
+        let journal = try CaptureLifecycleFiles.read(AndroidCaptureRoutingJournal.self, at: directory.appendingPathComponent("runtime/routing.json"))
+        routing["proxy"] = journal.applied.compactMapValues { $0 }
+        try fixture.writeJSON(routing, "routing.json")
+        let result = try await fixture.call(["stop", "--session", directory.path])
+        #expect(result.error == nil)
+        #expect((try fixture.json("routing.json")["proxy"] as? [String: String])?.isEmpty == true)
+    }
+
+    @Test func simulatorAutomaticProxyConfigurationIsNeverOverwritten() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let before: [String: Any] = ["service_id": "fixture-service", "service_name": "Fixture Wi-Fi", "enabled": true, "configuration_present": true,
+            "configuration": ["ProxyAutoConfigEnable": 1, "ProxyAutoConfigURLString": "https://example.invalid/proxy.pac"]]
+        try fixture.writeJSON(before, "mac-proxy.json")
+        let request = try fixture.request(platform: "simulator")
+        let result = try await fixture.call(["start", "--request", request.path])
+        #expect(result.error?.contains("automatic proxy") == true)
+        #expect(result.session?.text("phase") == "failed")
+        #expect(NSDictionary(dictionary: try fixture.json("mac-proxy.json")).isEqual(to: before))
+        #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("restore-result.json").path))
+    }
+
+    @Test func deniedSimulatorApplyRecoversWithoutAuthorizedRestoreWhenUnchanged() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeJSON(["apply_denied": true, "restore_fails": true], "faults.json")
+        let request = try fixture.request(platform: "simulator")
+        let result = try await fixture.call(["start", "--request", request.path])
+        #expect(result.error?.contains("Synthetic apply denied") == true)
+        #expect(result.session?.text("phase") == "failed")
+        #expect(result.session?["routing_restored"] == .bool(true))
+        #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("restore-invoked.json").path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("mac-proxy.json").path))
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-stopped").path))
+        let directory = URL(fileURLWithPath: try #require(result.session?.text("directory")))
+        let journal = try CaptureLifecycleFiles.read(CaptureHostState.self, at: directory.appendingPathComponent("runtime/routing.json"))
+        #expect(journal["restored"] == .bool(true))
+        #expect(journal.text("restored_at") != nil)
+    }
+
+    @Test func statusDoesNotOverwriteUnavailableSupervisorState() throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let directory = fixture.root.appendingPathComponent("read-only-session")
+        try CaptureLifecycleFiles.privateDirectory(directory)
+        let state: CaptureHostState = ["phase": .string("recording"), "warnings": .array([])]
+        let stateURL = directory.appendingPathComponent("session.json")
+        try CaptureLifecycleFiles.write(state, at: stateURL)
+        let original = try Data(contentsOf: stateURL)
+        let result = try NativeCaptureHost.status(directory: directory)
+        #expect(result.session?["supervisor_available"] == .bool(false))
+        #expect(try Data(contentsOf: stateURL) == original)
+    }
+
+    @Test func forcedCollectorShutdownRemainsPartialAfterHTTPWasObserved() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeJSON(["engine_ignore_stop": true], "faults.json")
+        let request = try fixture.request(platform: "android")
+        let start = try await fixture.call(["start", "--request", request.path])
+        let directory = URL(fileURLWithPath: try #require(start.session?.text("directory")))
+        let result = try await fixture.call(["stop", "--session", directory.path])
+        #expect(result.error == nil)
+        #expect(result.session?.text("phase") == "partial")
+        #expect(result.session?["routing_restored"] == .bool(true))
+        #expect(result.session?["sources"]?.object["network"] == .string("interrupted"))
+        #expect(result.session?["warnings"]?.array.compactMap(\.text).contains(where: { $0.contains("exited abnormally") }) == true)
+        let receipt = try CaptureLifecycleFiles.read(CaptureWorkerReceipt.self, at: directory.appendingPathComponent("runtime/network-worker.result.json"))
+        #expect(receipt.exit_code == -SIGKILL)
+        #expect(FileManager.default.fileExists(atPath: try #require(result.session?.text("package_path"))))
+    }
+
+    @Test func orphanedLegacyAndroidJournalIsRecoveredNatively() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let requestURL = try fixture.request(platform: "android")
+        let request = try CaptureLifecycleFiles.read(NativeCaptureRequest.self, at: requestURL)
+        let directory = fixture.root.appendingPathComponent("sessions/legacy-orphan")
+        for name in ["runtime", "logs", "network", "timeline"] { try CaptureLifecycleFiles.privateDirectory(directory.appendingPathComponent(name)) }
+        var state = fixture.legacyState(directory)
+        state["sources"] = .object(["logs": .string("not_selected"), "network": .string("started")])
+        try CaptureLifecycleFiles.write(state, at: directory.appendingPathComponent("session.json"))
+        try CaptureLifecycleFiles.write(request, at: directory.appendingPathComponent("runtime/request.json"))
+        let before = Dictionary(uniqueKeysWithValues: AndroidCaptureRouting.keys.map { ($0, nil as String?) })
+        let applied: [String: String?] = ["http_proxy": "127.0.0.1:45678", "global_http_proxy_host": "127.0.0.1", "global_http_proxy_port": "45678", "global_http_proxy_exclusion_list": "", "global_proxy_pac_url": ""]
+        var journal = AndroidCaptureRoutingJournal(device_id: "fixture-device", tools: ["adb": fixture.root.appendingPathComponent("adb").path], before: before, applied: applied, endpoint: "tcp:45678")
+        journal.reverse_attempted = true; journal.proxy_attempted = true
+        try CaptureLifecycleFiles.write(journal, at: directory.appendingPathComponent("runtime/routing.json"))
+        try fixture.writeJSON(["proxy": applied.compactMapValues { $0 }, "reverse": ["tcp:45678": "tcp:45678"]], "routing.json")
+        let result = try await fixture.call(["stop", "--session", directory.path])
+        #expect(result.error == nil)
+        #expect(result.session?["routing_restored"] == .bool(true))
+        #expect(result.session?.text("phase") == "partial")
+        #expect(result.session?["completeness"]?.object["interrupted"] == .bool(true))
+        #expect((try fixture.json("routing.json")["proxy"] as? [String: String])?.isEmpty == true)
+        #expect((try fixture.json("routing.json")["reverse"] as? [String: String])?.isEmpty == true)
+    }
+
+    @Test func nativeStopAuthenticatesLegacySessionControlProtocol() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let directory = fixture.root.appendingPathComponent("sessions/legacy-running")
+        try CaptureLifecycleFiles.privateDirectory(directory.appendingPathComponent("runtime"))
+        try CaptureLifecycleFiles.write(fixture.legacyState(directory), at: directory.appendingPathComponent("session.json"))
+        let controlURL = directory.appendingPathComponent("runtime/control.json")
+        let control = CaptureHostControl(socket: "/tmp/capture-legacy-\(UUID().uuidString).sock", token: CaptureHostSocket.token())
+        defer { _ = unlink(control.socket) }
+        try CaptureLifecycleFiles.write(control, at: controlURL)
+        let legacy = try CaptureOwnedProcess(executable: fixture.root.appendingPathComponent("legacy-controller"), arguments: [directory.path],
+            stdout: directory.appendingPathComponent("runtime/legacy.stdout"), stderr: directory.appendingPathComponent("runtime/legacy.stderr"))
+        defer { legacy.terminateOwnedHandle() }
+        try await LifecycleFixture.wait { FileManager.default.fileExists(atPath: control.socket) }
+        try CaptureLifecycleFiles.write(CaptureHostControl(socket: control.socket, token: "invalid-token"), at: controlURL)
+        let rejected = try await fixture.call(["status", "--session", directory.path])
+        #expect(rejected.session?["supervisor_available"] == .bool(false))
+        #expect(legacy.isRunning)
+        try CaptureLifecycleFiles.write(control, at: controlURL)
+        let result = try await fixture.call(["stop", "--session", directory.path])
+        #expect(result.error == nil)
+        #expect(result.session?.text("phase") == "saved")
+        #expect(result.session?["routing_restored"] == .bool(true))
+        try await LifecycleFixture.wait { !legacy.isRunning }
+    }
+
+    @Test func globalLockExcludesConcurrentCaptureAndAcceptsLegacy644File() throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let lock = fixture.root.appendingPathComponent("lock")
+        try CaptureLifecycleFiles.privateDirectory(lock)
+        let path = lock.appendingPathComponent("owner.lock")
+        try Data().write(to: path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path.path)
+        let lease = try CaptureRoutingLease(sessionDirectory: fixture.root, lockDirectory: lock)
+        defer { withExtendedLifetime(lease) {} }
+        #expect(throws: AppError.self) { try CaptureRoutingLease(sessionDirectory: fixture.root, lockDirectory: lock) }
+        #expect((try FileManager.default.attributesOfItem(atPath: path.path)[.posixPermissions] as? Int).map { $0 & 0o777 } == 0o600)
+    }
+
+    @Test func workerEOFStopsOwnedCollectorGroupAndWritesReceipt() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let directory = fixture.root.appendingPathComponent("manual-worker")
+        for name in ["runtime", "logs"] { try CaptureLifecycleFiles.privateDirectory(directory.appendingPathComponent(name)) }
+        let config = CaptureWorkerConfiguration(command: [fixture.root.appendingPathComponent("adb").path, "-s", "fixture-device", "logcat", "-v", "epoch"],
+            output: directory.appendingPathComponent("logs/device.log").path, stderr: directory.appendingPathComponent("runtime/logs.stderr").path)
+        let configURL = directory.appendingPathComponent("runtime/logs-worker.json")
+        try CaptureLifecycleFiles.write(config, at: configURL)
+        let process = try CaptureOwnedProcess(executable: fixture.host, arguments: ["_worker", "--config", configURL.path],
+            stdout: directory.appendingPathComponent("runtime/worker.stdout"), stderr: directory.appendingPathComponent("runtime/worker.stderr"), keepAlivePipe: true)
+        try await LifecycleFixture.wait { FileManager.default.fileExists(atPath: directory.appendingPathComponent("logs/device.log").path) && (try? Data(contentsOf: directory.appendingPathComponent("logs/device.log")).isEmpty) == false }
+        process.requestStop()
+        try await LifecycleFixture.wait { !process.isRunning }
+        let receipt = try CaptureLifecycleFiles.read(CaptureWorkerReceipt.self, at: directory.appendingPathComponent("runtime/logs-worker.result.json"))
+        #expect(receipt.exit_code == 0)
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("logs-stopped").path))
+    }
+
+    @Test func supervisorCrashIsRecoveredFromReceiptsWithoutDiskPIDSignals() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let requestURL = try fixture.request(platform: "android")
+        let request = try CaptureLifecycleFiles.read(NativeCaptureRequest.self, at: requestURL)
+        let directory = fixture.root.appendingPathComponent("sessions/manual-supervisor")
+        for name in ["runtime", "logs", "network", "timeline"] { try CaptureLifecycleFiles.privateDirectory(directory.appendingPathComponent(name)) }
+        let state: CaptureHostState = ["id": .string("crash-fixture"), "directory": .string(directory.path), "platform": .string("android"), "device_id": .string("fixture-device"), "device_name": .string("Fixture"),
+            "started_at": .string(CaptureLifecycleFiles.timestamp()), "phase": .string("preparing"), "warnings": .array([]), "sources": .object(["logs": .string("preparing"), "network": .string("preparing")]), "routing_restored": .null]
+        try CaptureLifecycleFiles.write(state, at: directory.appendingPathComponent("session.json"))
+        try CaptureLifecycleFiles.write(request, at: directory.appendingPathComponent("runtime/request.json"))
+        let control = CaptureHostControl(socket: "/tmp/capture-test-\(UUID().uuidString).sock", token: CaptureHostSocket.token())
+        try CaptureLifecycleFiles.write(control, at: directory.appendingPathComponent("runtime/control.json"))
+        let supervisor = try CaptureOwnedProcess(executable: fixture.host, arguments: ["_supervise", "--session", directory.path],
+            stdout: directory.appendingPathComponent("runtime/supervisor.stdout"), stderr: directory.appendingPathComponent("runtime/supervisor.stderr"))
+        try await LifecycleFixture.wait { (try? NativeCaptureHost.load(directory).text("phase")) == "recording" }
+        // This PID comes from a live Process handle that this test created.
+        try #require(kill(supervisor.process.processIdentifier, SIGKILL) == 0)
+        try await LifecycleFixture.wait { !supervisor.isRunning }
+        let result = try await fixture.call(["stop", "--session", directory.path])
+        #expect(result.error == nil)
+        #expect(result.session?.text("phase") == "partial")
+        #expect(result.session?["routing_restored"] == .bool(true))
+        #expect(result.session?["completeness"]?.object["interrupted"] == .bool(true))
+        #expect(result.session?["sources"]?.object["network"] == .string("interrupted"))
+    }
+}
+
+private struct LifecycleFixture {
+    let root: URL
+    let host: URL
+    init() throws {
+        let environment = ProcessInfo.processInfo.environment
+        host = URL(fileURLWithPath: try #require(environment["CAPTURE_TEST_HOST"]))
+        let tool = URL(fileURLWithPath: try #require(environment["CAPTURE_TEST_TOOL"]))
+        root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("native-lifecycle-\(UUID().uuidString)")
+        try CaptureLifecycleFiles.privateDirectory(root)
+        for name in ["adb", "simctl", "mitmdump", "mobile-capture-proxy", "legacy-controller"] { try FileManager.default.copyItem(at: tool, to: root.appendingPathComponent(name)) }
+        try CaptureLifecycleFiles.privateDirectory(root.appendingPathComponent("runtime-source"))
+        try Data("# synthetic engine does not load this file\n".utf8).write(to: root.appendingPathComponent("runtime-source/network_addon.py"))
+    }
+
+    func request(platform: String) throws -> URL {
+        let request = NativeCaptureRequest(platform: platform, device_id: platform == "android" ? "fixture-device" : "fixture-simulator", device_name: "Fixture", capture_logs: true, capture_network: true,
+            output_root: root.appendingPathComponent("sessions").path, target_app: platform == "simulator" ? "dev.mobilecapture.fixture" : nil, network_service: "Fixture Wi-Fi", trust_simulator_ca: false,
+            adb_path: root.appendingPathComponent("adb").path, simctl_path: root.appendingPathComponent("simctl").path, mitmdump_path: root.appendingPathComponent("mitmdump").path,
+            ca_directory: root.appendingPathComponent("ca").path, proxy_helper_path: root.appendingPathComponent("mobile-capture-proxy").path, runtime_directory: root.appendingPathComponent("runtime-source").path, lock_directory: root.appendingPathComponent("lock").path)
+        let path = root.appendingPathComponent("request.json")
+        try CaptureLifecycleFiles.write(request, at: path)
+        return path
+    }
+
+    func call(_ arguments: [String]) async throws -> CaptureHostEnvelope {
+        let output = try await ProcessShellRunner(timeout: .seconds(120)).run(host, arguments: arguments)
+        guard let result = try? JSONDecoder().decode(CaptureHostEnvelope.self, from: Data(output.stdout.utf8)) else {
+            throw AppError("Host returned unreadable output: \(output.stdout)\n\(output.stderr)")
+        }
+        return result
+    }
+
+    func writeJSON(_ value: [String: Any], _ name: String) throws {
+        try JSONSerialization.data(withJSONObject: value).write(to: root.appendingPathComponent(name), options: .atomic)
+    }
+    func json(_ name: String) throws -> [String: Any] { try #require(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent(name))) as? [String: Any]) }
+
+    func legacyState(_ directory: URL) -> CaptureHostState {
+        ["id": .string("legacy-fixture"), "directory": .string(directory.path), "platform": .string("android"), "device_id": .string("fixture-device"), "device_name": .string("Fixture"),
+         "started_at": .string(CaptureLifecycleFiles.timestamp()), "phase": .string("recording"), "warnings": .array([]), "sources": .object(["logs": .string("started"), "network": .string("started")]), "routing_restored": .null]
+    }
+
+    func cleanup() {
+        try? writeJSON([:], "faults.json")
+        let sessions = root.appendingPathComponent("sessions")
+        if let names = try? FileManager.default.contentsOfDirectory(at: sessions, includingPropertiesForKeys: nil) {
+            for directory in names where FileManager.default.fileExists(atPath: directory.appendingPathComponent("session.json").path) {
+                let process = Process(); process.executableURL = host; process.arguments = ["stop", "--session", directory.path]
+                process.standardInput = FileHandle.nullDevice; process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.nullDevice
+                if (try? process.run()) != nil { process.waitUntilExit() }
+            }
+        }
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    static func wait(_ condition: () throws -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(15)
+        while try !condition() {
+            guard ContinuousClock.now < deadline else { throw AppError("Timed out waiting for synthetic capture process") }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+    }
+}

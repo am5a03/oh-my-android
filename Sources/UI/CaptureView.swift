@@ -6,29 +6,26 @@ struct CaptureView: View {
     @State private var showRuntimeSettings = false
     @State private var showCaptureWarnings = false
     @State private var isStopping = false
+    @State private var headerContentHeight: CGFloat = 0
+    @State private var recoveryNoticeHeight: CGFloat = 32
+    @State private var timelineHeaderHeight: CGFloat = 130
+    @State private var markerComposerHeight: CGFloat = 84
+    @State private var footerHeight: CGFloat = 44
+    private let minimumEventPaneHeight: CGFloat = 180
 
     var body: some View {
-        VStack(spacing: 0) {
-            setup
-            Divider()
-            sessionStatus
-            if let error = store.error { notice(error, symbol: "exclamationmark.triangle.fill", color: .red) }
-            if let session = store.session {
-                if session.routingRestored == false {
-                    notice("Connection needs recovery. Choose Restore Connection & Save before disconnecting the device.", symbol: "network.slash", color: .red)
-                    ForEach(Array(session.warnings.filter { $0.hasPrefix("Routing recovery still required:") }.enumerated()), id: \.offset) { _, warning in
-                        notice(warning, symbol: "exclamationmark.triangle.fill", color: .red)
-                    }
-                }
-                if session.needsPackageRetry, !store.hasActiveCapture {
-                    notice("The ZIP is not available. Use Retry Save to package the existing capture evidence.", symbol: "archivebox", color: .orange)
-                }
-                captureWarnings(session)
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                captureHeader(maximumHeight: headerMaximumHeight(available: geometry.size.height))
+                Divider()
+                timeline
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
+                Divider()
+                footer
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
             }
-            Divider()
-            timeline
-            Divider()
-            footer
         }
         .frame(minWidth: 960, minHeight: 680)
         .onChange(of: store.session?.id) { showCaptureWarnings = false }
@@ -92,6 +89,56 @@ struct CaptureView: View {
                 }
             }
         }
+    }
+
+    private func headerMaximumHeight(available height: CGFloat) -> CGFloat {
+        // Expanded prerequisites/warnings yield space before the evidence pane does.
+        let reserved = minimumEventPaneHeight + timelineHeaderHeight + markerComposerHeight + footerHeight + 2
+        return max(0, min(360, min(height * 0.4, height - reserved)))
+    }
+
+    private func captureHeader(maximumHeight: CGFloat) -> some View {
+        let recoveryHeight = store.session?.routingRestored == false ? recoveryNoticeHeight : 0
+        let availableForContent = max(0, maximumHeight - recoveryHeight)
+        let contentHeight = headerContentHeight > 0 ? min(headerContentHeight, availableForContent) : availableForContent
+        return VStack(spacing: 0) {
+            if store.session?.routingRestored == false {
+                notice("Connection needs recovery. Choose Restore Connection & Save before disconnecting the device.", symbol: "network.slash", color: .red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { recoveryNoticeHeight = $0 }
+            }
+            ScrollView(.vertical) {
+                headerContent
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerContentHeight = $0 }
+            }
+            .scrollIndicators(.visible)
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: contentHeight)
+            .accessibilityLabel("Capture setup, status and warnings")
+        }
+        .frame(height: min(maximumHeight, recoveryHeight + contentHeight), alignment: .top)
+    }
+
+    private var headerContent: some View {
+        VStack(spacing: 0) {
+            setup
+            Divider()
+            sessionStatus
+            if let error = store.error { notice(error, symbol: "exclamationmark.triangle.fill", color: .red) }
+            if let session = store.session {
+                if session.routingRestored == false {
+                    ForEach(Array(session.warnings.filter { $0.hasPrefix("Routing recovery still required:") }.enumerated()), id: \.offset) { _, warning in
+                        notice(warning, symbol: "exclamationmark.triangle.fill", color: .red)
+                    }
+                }
+                if session.needsPackageRetry, !store.hasActiveCapture {
+                    notice("The ZIP is not available. Use Retry Save to package the existing capture evidence.", symbol: "archivebox", color: .orange)
+                }
+                captureWarnings(session)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// An explicit HStack keeps these action names visible in an icon-only toolbar configuration.
@@ -235,7 +282,6 @@ struct CaptureView: View {
     private var runtimeSettings: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                runtimeField("Python 3", value: $store.pythonPath, placeholder: "Automatic discovery")
                 runtimeField("ADB", value: $store.adbPath, placeholder: store.toolPath("adb") ?? "Not detected")
                 runtimeField("mitmdump", value: $store.mitmdumpPath, placeholder: store.toolPath("mitmdump") ?? "Not detected")
             }
@@ -249,7 +295,7 @@ struct CaptureView: View {
                 Text("Local captures: \(store.outputRoot.path)").textSelection(.enabled).lineLimit(1).truncationMode(.middle)
                 Button("Choose folder…") { store.chooseOutputRoot() }
             }
-            Text("Prototype dependencies: Python 3, Android platform tools for Android, Xcode Simulator tools for iOS, and mitmproxy for network capture. Use absolute paths for overrides, then refresh devices.")
+            Text("Capture is managed by the app’s compiled Swift service. Android needs platform tools, iOS Simulator needs Xcode tools, and network capture uses mitmproxy. Use absolute paths for tool overrides, then refresh devices.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -257,7 +303,7 @@ struct CaptureView: View {
     private func runtimeField(_ title: String, value: Binding<String>, placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-            TextField(placeholder, text: value).textFieldStyle(.roundedBorder)
+            TextField(placeholder, text: value).textFieldStyle(.roundedBorder).accessibilityLabel(title)
         }
     }
 
@@ -328,7 +374,7 @@ struct CaptureView: View {
         .help(status == "tls_failed" ? "Traffic reached the proxy, but TLS failed before a request could be decoded. Check CA trust and the error details." : (status == "started" ? "Collector started; fresh evidence has not yet been observed." : "Status reported by the capture source."))
     }
 
-    private var timeline: some View {
+    private var timelineHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
                 Text("Shared timeline").font(.headline)
@@ -378,10 +424,25 @@ struct CaptureView: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .padding(.horizontal, 16).padding(.bottom, 8)
             }
-            HSplitView {
-                eventList.frame(minWidth: 460)
-                eventDetail.frame(minWidth: 290, idealWidth: 350)
+        }
+    }
+
+    private var timeline: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            timelineHeader
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { timelineHeaderHeight = $0 }
+            GeometryReader { pane in
+                HSplitView {
+                    eventList.frame(minWidth: 460, maxHeight: .infinity)
+                    eventDetail.frame(minWidth: 290, idealWidth: 350, maxHeight: .infinity)
+                }
+                // The AppKit-backed split view otherwise keeps its intrinsic minimum height inside
+                // an expanding outer frame. Give it the actual remaining pane size instead.
+                .frame(width: pane.size.width, height: pane.size.height)
             }
+            .frame(minHeight: minimumEventPaneHeight, maxHeight: .infinity)
+            .layoutPriority(1)
             VStack(alignment: .leading, spacing: 5) {
                 Text(store.session?.phase == "recording" ? "Add a note at the current time. Selecting a row only opens its details." : "Start recording to add a time marker.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -404,6 +465,8 @@ struct CaptureView: View {
                 }
             }
             .padding(12)
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { markerComposerHeight = $0 }
         }
     }
 
@@ -464,14 +527,21 @@ struct CaptureView: View {
         return "Add your note at the current time. Choose All Sources or Markers to see it in the timeline."
     }
 
-    @ViewBuilder
     private var eventList: some View {
-        if store.visibleEvents.isEmpty {
-            ContentUnavailableView(emptyTimelineTitle, systemImage: "list.bullet.rectangle", description: Text(emptyTimelineHelp))
-        } else {
-            CaptureTimelineList(rows: store.visibleEvents, selectedEventID: $store.selectedEventID,
+        let rows = store.retainedTimelineRows
+        let showsOverlay = !store.timelineMatchesFilters || rows.isEmpty
+        return ZStack {
+            CaptureTimelineList(rows: rows, selectedEventID: $store.selectedEventID,
                 followLatest: store.followLatest && !store.isViewPaused, newestFirst: store.newestFirst, wrapLines: store.wrapLines,
                 jumpToLatestToken: store.jumpToLatestToken, onInteraction: { store.userDidInteractWithTimeline() })
+                .disabled(showsOverlay)
+                .allowsHitTesting(!showsOverlay)
+                .accessibilityHidden(showsOverlay)
+            if showsOverlay {
+                ContentUnavailableView(emptyTimelineTitle, systemImage: "list.bullet.rectangle", description: Text(emptyTimelineHelp))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(nsColor: .textBackgroundColor))
+            }
         }
     }
 

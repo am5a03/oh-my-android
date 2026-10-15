@@ -6,6 +6,40 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct CaptureTimelineListTests {
+    @Test func pendingFilterDisablesNativeInputAndPreservesTheSameTableAnchor() throws {
+        let harness = Harness(rows: makeRows(0..<80))
+        defer { harness.close() }
+        harness.state.selectedID = "event-30"
+        harness.update()
+        harness.scroll(toRow: 25, offset: 11)
+        let anchor = try harness.anchor()
+        let window = NSWindow(contentRect: harness.scrollView.bounds, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = harness.scrollView
+        defer { window.close() }
+        #expect(window.makeFirstResponder(harness.table))
+
+        // SwiftUI keeps the old rows behind an opaque loading overlay and disables its representable.
+        harness.update(isEnabled: false)
+        #expect(!harness.table.isEnabled)
+        #expect(harness.scrollView.isAccessibilityHidden())
+        #expect(window.firstResponder !== harness.table)
+        harness.table.selectRowIndexes(IndexSet(integer: 31), byExtendingSelection: false)
+        let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: "\u{F701}", charactersIgnoringModifiers: "\u{F701}",
+            isARepeat: false, keyCode: 125))
+        harness.table.keyDown(with: event)
+        #expect(harness.table.selectedRow == 31)
+        #expect(harness.state.selectedID == "event-30")
+        #expect(harness.state.interactions == 0)
+
+        harness.update()
+        #expect(harness.table.isEnabled)
+        #expect(!harness.scrollView.isAccessibilityHidden())
+        #expect(harness.selectedID == "event-30")
+        try harness.expectAnchor(anchor)
+    }
+
     @Test func preservesSelectionAndViewportAcrossAppendPrependAndReload() throws {
         let harness = Harness(rows: makeRows(0..<80))
         defer { harness.close() }
@@ -204,8 +238,8 @@ private final class Harness {
         update()
     }
 
-    func update() {
-        coordinator.update(state.view)
+    func update(isEnabled: Bool = true) {
+        coordinator.update(state.view, isEnabled: isEnabled)
         scrollView.layoutSubtreeIfNeeded()
         table.layoutSubtreeIfNeeded()
     }

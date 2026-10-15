@@ -59,7 +59,7 @@ struct CaptureTimelineList: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        context.coordinator.update(self)
+        context.coordinator.update(self, isEnabled: context.environment.isEnabled)
     }
 
     static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
@@ -84,6 +84,7 @@ struct CaptureTimelineList: NSViewRepresentable {
         private var lastOlderEdgeID: String?
         private var edgeCheckScheduled = false
         private var isAttached = false
+        private var isInteractionEnabled = true
 
         init(_ parent: CaptureTimelineList) { self.parent = parent }
 
@@ -105,7 +106,7 @@ struct CaptureTimelineList: NSViewRepresentable {
             table?.onUserNavigation = nil
         }
 
-        func update(_ parent: CaptureTimelineList) {
+        func update(_ parent: CaptureTimelineList, isEnabled: Bool = true) {
             guard let table, let scrollView else { return }
             let anchor = viewportAnchor()
             let dataChanged = rows.map(\.id) != parent.rows.map(\.id)
@@ -117,6 +118,15 @@ struct CaptureTimelineList: NSViewRepresentable {
             self.parent = parent
             isApplyingUpdate = true
             defer { isApplyingUpdate = false }
+            isInteractionEnabled = isEnabled
+            table.isEnabled = isEnabled
+            scrollView.isTimelineInteractionEnabled = isEnabled
+            scrollView.verticalScroller?.isEnabled = isEnabled
+            scrollView.setAccessibilityHidden(!isEnabled)
+            if !isEnabled, let window = table.window, let responder = window.firstResponder as? NSView,
+               responder === table || responder.isDescendant(of: table) {
+                window.makeFirstResponder(nil)
+            }
 
             rows = parent.rows
             indexByID = Dictionary(uniqueKeysWithValues: rows.enumerated().map { ($0.element.id, $0.offset) })
@@ -175,7 +185,7 @@ struct CaptureTimelineList: NSViewRepresentable {
         }
 
         func tableViewSelectionDidChange(_ notification: Notification) {
-            guard !isApplyingUpdate, let table else { return }
+            guard !isApplyingUpdate, isInteractionEnabled, let table else { return }
             userInteracted()
             let index = table.selectedRow
             parent.selectedEventID = rows.indices.contains(index) ? rows[index].id : nil
@@ -242,7 +252,7 @@ struct CaptureTimelineList: NSViewRepresentable {
         }
 
         fileprivate func userInteracted() {
-            guard !isApplyingUpdate else { return }
+            guard !isApplyingUpdate, isInteractionEnabled else { return }
             parent.onInteraction()
             scheduleOlderEdgeCheck()
         }
@@ -278,7 +288,7 @@ struct CaptureTimelineList: NSViewRepresentable {
         }
 
         private func checkOlderEdge() {
-            guard isAttached, !isApplyingUpdate, !parent.followLatest, let scrollView, let table, !rows.isEmpty,
+            guard isAttached, isInteractionEnabled, !isApplyingUpdate, !parent.followLatest, let scrollView, let table, !rows.isEmpty,
                   let callback = parent.onReachedOlderEdge else { return }
             let visible = scrollView.contentView.bounds
             let nearOlderEdge = parent.newestFirst
@@ -295,8 +305,10 @@ struct CaptureTimelineList: NSViewRepresentable {
 @MainActor
 private final class TimelineScrollView: NSScrollView {
     var onUserScroll: (() -> Void)?
+    var isTimelineInteractionEnabled = true
 
     override func scrollWheel(with event: NSEvent) {
+        guard isTimelineInteractionEnabled else { return }
         onUserScroll?()
         super.scrollWheel(with: event)
     }
@@ -307,6 +319,7 @@ private final class TimelineScroller: NSScroller {
     var onUserScroll: (() -> Void)?
 
     override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
         onUserScroll?()
         super.mouseDown(with: event)
     }
@@ -317,11 +330,13 @@ private final class TimelineTableView: NSTableView {
     var onUserNavigation: (() -> Void)?
 
     override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
         if row(at: convert(event.locationInWindow, from: nil)) >= 0 { onUserNavigation?() }
         super.mouseDown(with: event)
     }
 
     override func keyDown(with event: NSEvent) {
+        guard isEnabled else { return }
         if [115, 116, 119, 121, 123, 124, 125, 126].contains(event.keyCode) { onUserNavigation?() }
         super.keyDown(with: event)
     }

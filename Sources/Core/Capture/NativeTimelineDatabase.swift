@@ -83,7 +83,10 @@ final class NativeTimelineDatabase {
             }
             guard status == SQLITE_OK else { throw failure() }
         }
-        let readOnly = sqlite3_stmt_readonly(statement) != 0
+        // SQLite calls transaction control "read-only" too. Rollback/commit must remain
+        // callable from a cancelled task so interrupted reads cannot poison the connection.
+        let operation = sql.split(whereSeparator: \.isWhitespace).first.map { $0.uppercased() } ?? ""
+        let readOnly = sqlite3_stmt_readonly(statement) != 0 && !["BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT", "RELEASE"].contains(operation)
         if readOnly {
             try Task.checkCancellation()
             // Runs synchronously inside this actor task's sqlite3_step. Do not install this

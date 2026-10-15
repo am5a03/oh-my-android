@@ -153,3 +153,62 @@ quick-actions and Simulator suites also pass, with 25 and 37 checks respectively
 
 See [setup and operation](CAPTURE.md), [package schema](CAPTURE-PACKAGE.md), and
 [runtime contract](CAPTURE-PROTOTYPE-CONTRACT.md) for implementation details.
+
+## Native Swift migration checkpoint
+
+Fresh live proofs exercised the compiled Swift capture host, native timeline
+index and native exporter on Android emulator and iOS Simulator. These
+observations supplement the historical Python-coordinator results above. The
+Swift app and its compiled host/proxy helpers build successfully with strict
+concurrency checking and warnings treated as errors.
+
+Both neutral fixtures completed an HTTPS POST with HTTP 200. Verification
+matched the device's response SHA-256 to the captured body, confirmed full
+HAR/native request and response body equality, resolved normalized timeline
+references and validated the single ZIP's checksums. Native marker creation was
+also exercised through a compiled Swift timeline CLI using the actual index's
+marker-append path.
+
+| Observation | Native Android proof | Native iOS Simulator proof |
+| --- | --- | --- |
+| Target | Android 12 / API 31 emulator | iPhone 17 Pro, iOS 26.4 Simulator |
+| Proof response | HTTP 200 | HTTP 200 |
+| Full request body | 68 bytes | 72 bytes |
+| Full response body | 960 bytes | 1,078 bytes |
+| Timeline / package | 162 events / 11 files | 1,675 events / 11 files |
+| Device logs and decoded network | Both observed | Both observed |
+| Device hash and HAR/native body parity | Verified | Verified |
+| Package checksums and evidence references | Verified | Verified |
+| Other traffic | 1 background TLS certificate rejection; 0 request errors | 72 background TLS certificate rejections; 0 request errors |
+| Package result | Partial, preserving the background TLS gap | Partial, preserving the background TLS gaps |
+| CA setup | Existing public CA/trust reused; no import | Existing public CA/trust reused; no import |
+| Connection restoration | Exact saved Android proxy keys; runtime-cache clear acknowledged; zero remaining reverse mappings | Exact complete Wi-Fi proxy snapshot, including enabled state and configuration presence |
+
+The Android routing journal recorded
+`runtime_proxy_clear_acknowledged: true`, and the original proxy key values were
+restored before the owned reverse connection was removed. The Simulator's full
+Wi-Fi configuration, enabled state and configuration-presence flag matched the
+saved original after Stop. These checks cover live runtime cleanup as well as
+database or dictionary values.
+
+An initial Simulator attempt could not complete network-settings authorization
+while the Mac was locked. It retained a failed capture package and completed
+connection recovery. A fresh attempt after unlocking completed the live proof
+and exact restoration successfully. Separate synthetic denied-apply coverage
+verifies that an unchanged complete snapshot can be marked restored without
+requesting authorization again.
+
+An additional capture ran through the app UI: select the Android emulator, start
+device logs, type and save a marker, pause the display, emit a neutral device log,
+clear the view, restore the full session, resume and stop. Capture continued
+while paused; the resumed timeline included the new log and marker. Stop saved
+a complete ZIP retaining both items. Native menu validation and lazy event
+inspection were also checked in the running app.
+
+The proof request succeeded on both platforms while unrelated certificate
+rejections remained explicit in their partial packages. This does not establish
+visibility into every SDK, pinning configuration, QUIC connection or app that
+bypasses the proxy. These native checkpoint observations cover Android emulator
+and iOS Simulator only; they make no physical iPhone claim. Dependency bundling,
+distribution signing/notarization and broader device/SDK coverage remain release
+work. See [native runtime architecture and recovery](CAPTURE-NATIVE-RUNTIME.md).

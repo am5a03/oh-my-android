@@ -34,13 +34,23 @@ targets:
     platform: macOS
     sources:
       - path: Sources
-        excludes: ["MCP/**", "CaptureHost/**"]
+        excludes: ["MCP/**", "CaptureHost/**", "CaptureProxy/**", "Core/CaptureLifecycle/**", "Core/CaptureServices/CaptureEvidence*.swift"]
       - path: CaptureRuntime
         type: folder
         buildPhase: resources
     dependencies:
       # The MCP server ships inside the app: Contents/MacOS/ohmyandroid-mcp, signed with it.
       - target: ohmyandroid-mcp
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+      - target: mobile-capture-host
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+      - target: mobile-capture-proxy
         embed: true
         codeSign: true
         copy:
@@ -97,6 +107,40 @@ targets:
         PRODUCT_MODULE_NAME: OhMyAndroidMCP
         PRODUCT_BUNDLE_IDENTIFIER: se.royan.ohmyandroid.mcp
         # Embedded Info.plist: gives the binary a stable signing identifier and a version.
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        SKIP_INSTALL: YES
+
+  mobile-capture-host:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/Core/Support.swift
+      - path: Sources/Core/Shell/ShellRunner.swift
+      - path: Sources/Core/CaptureModels.swift
+      - path: Sources/Core/Capture
+      - path: Sources/Core/CaptureServices
+      - path: Sources/Core/CaptureLifecycle
+      - path: Sources/CaptureHost
+    settings:
+      base:
+        PRODUCT_NAME: mobile-capture-host
+        PRODUCT_MODULE_NAME: MobileCaptureHost
+        PRODUCT_BUNDLE_IDENTIFIER: se.royan.ohmyandroid.capture-host
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        SKIP_INSTALL: YES
+
+  mobile-capture-proxy:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/CaptureProxy
+    settings:
+      base:
+        PRODUCT_NAME: mobile-capture-proxy
+        PRODUCT_MODULE_NAME: MobileCaptureProxy
+        PRODUCT_BUNDLE_IDENTIFIER: se.royan.ohmyandroid.capture-proxy
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         SKIP_INSTALL: YES

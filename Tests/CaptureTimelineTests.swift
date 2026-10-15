@@ -66,6 +66,18 @@ struct CaptureTimelineTests {
         try require(!store.isViewPaused && !store.followLatest, "one-time jump resumes presentation without enabling follow")
         try require(store.selectedEvent?.id == originalIDs[20], "selected detail survives paging and clear")
 
+        // Manual display actions must not let an obsolete query relabel old-source rows.
+        for _ in 0..<4 {
+            store.sourceFilter = "logs"
+            async let pause: Void = store.togglePauseView()
+            await Task.yield()
+            store.sourceFilter = "network"
+            _ = await pause
+            try await wait { store.timelineMatchesFilters && !store.isLoadingTimeline }
+            try require(store.visibleEvents.allSatisfy { $0.source == "network" }, "pause and filter races never mix source rows")
+            await store.jumpToLatest()
+        }
+
         // Finish the synthetic session so filters must work without a polling loop.
         try writeState("saved")
         try await wait { store.session?.isActive == false && !store.isBusy }

@@ -6,8 +6,9 @@ Simulators in phase 1. Physical iPhone collection belongs to a later phase.
 This format has no company app identifiers, SDK assumptions, repository paths,
 accounts, or private service dependencies.
 
-The runtime stops collectors and restores routing before calling
-`finalize_package(session_dir, manifest)`. The result is one
+The runtime stops collectors and restores routing before native
+`CaptureEvidenceExporter.export(...)` or legacy Python
+`finalize_package(session_dir, manifest)`. Both produce this schema. The result is one
 `capture-package.zip` inside the session directory. Failed and interrupted
 captures can also be exported; export success alone does not establish capture
 completeness or successful restoration. Those results remain in the manifest.
@@ -42,7 +43,9 @@ The exact raw allowlist is the six optional evidence files shown above.
 `session.json` is used to normalize the live timeline but is not copied into the
 package. Public metadata is selected from the supplied manifest instead.
 Private CA directories/keys, runtime requests, control tokens/sockets, recovery
-journals, worker logs, arbitrary files and prior ZIP files are excluded.
+journals, worker logs, arbitrary files and prior ZIP files are excluded. The
+native timeline's private SQLite index is also excluded; it is a disposable
+query cache, not an export source.
 Nested secret metadata fields such as `control_token`, `api_key`, `password`,
 `private_key` and credential fields are omitted from exported context/manifest.
 HTTP headers/bodies and device log contents remain original evidence; this
@@ -188,9 +191,14 @@ these digests after extraction. `manifest.artifacts` also records each raw
 artifact's digest and original byte length. Hashes detect byte changes; they
 are not a signed assertion of who collected the session.
 
-File order, JSON serialization, ZIP entry timestamps and permissions are fixed.
-Given identical raw evidence and supplied metadata, repeat exports are
-byte-identical on the same Python/zlib implementation. Finalization does not
+File order, JSON serialization, ZIP entry timestamps and permissions are fixed
+within each exporter. Given identical raw evidence and metadata, repeat exports
+are byte-identical with the same native ZIP implementation or the same legacy
+Python/zlib implementation. Compressed ZIP bytes and JSON whitespace need not
+match across exporters; original evidence bytes, schema and digest semantics
+remain compatible. Native export streams its source files and full normalized
+timeline, validates event IDs/references against staged raw copies, and rejects
+missing or duplicate normalized evidence. Finalization does not
 modify the supplied manifest, raw files, source timestamps or routing state.
 
 ## Evidence-only verification

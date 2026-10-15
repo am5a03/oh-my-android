@@ -2,24 +2,14 @@ import AppKit
 import Observation
 import UniformTypeIdentifiers
 
-private struct CaptureDiscovery: Decodable, Sendable {
-    let devices: [CaptureDevice]
-    let tools: [String: String?]
-    let networkServices: [String]
-}
-
 private struct CaptureUpdate: Decodable, Sendable {
     let session: CaptureSession
-    var events: [CaptureEvent]? = nil
-    var timeline: CaptureTimeline? = nil
 }
 
 /// A failed operation can still own a session that needs Stop to restore routing.
 private struct CaptureRuntimeFailure: Decodable, LocalizedError, Sendable {
     let error: String
     let session: CaptureSession?
-    let events: [CaptureEvent]?
-    let timeline: CaptureTimeline?
     var errorDescription: String? { error }
 }
 
@@ -35,52 +25,36 @@ private struct CaptureStartRequest: Encodable {
     let trustSimulatorCa: Bool
     let adbPath: String?
     let mitmdumpPath: String?
+    let proxyHelperPath: String?
+    let runtimeDirectory: String?
 }
 
-/// Uses argument arrays only. No device, path, app filter or marker text is passed to a shell.
+/// The app talks to a compiled sibling helper. JSON carries session metadata, never captured bodies.
 private struct CaptureRuntimeClient: Sendable {
-    let pythonOverride: String
+    let executableOverride: URL?
 
-    private func executable() throws -> URL {
-        let fm = FileManager.default
-        let override = pythonOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !override.isEmpty {
-            guard override.hasPrefix("/"), fm.isExecutableFile(atPath: override) else {
-                throw AppError("Choose an executable Python 3 using an absolute path in Runtime settings.")
-            }
-            return URL(fileURLWithPath: override)
+    func executable() throws -> URL {
+        let sibling = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("mobile-capture-host")
+        guard let executable = executableOverride ?? sibling,
+              executable.path.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: executable.path) else {
+            throw AppError("The compiled capture service is missing. Rebuild or reinstall the app with mobile-capture-host embedded.")
         }
-        let environment = ProcessInfo.processInfo.environment
-        let paths = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"]
-            + (environment["PATH"] ?? "").split(separator: ":").map { String($0) + "/python3" }
-        guard let path = paths.first(where: { fm.isExecutableFile(atPath: $0) }) else {
-            throw AppError("Python 3 is required. Install it or choose its executable in Runtime settings.")
-        }
-        return URL(fileURLWithPath: path)
+        return executable
     }
 
-    private func script() throws -> URL {
-        let bundled = Bundle.main.resourceURL?.appendingPathComponent("CaptureRuntime/capture_runtime.py")
-        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("CaptureRuntime/capture_runtime.py")
-        guard let result = [bundled, source].compactMap({ $0 }).first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
-            throw AppError("Capture runtime is missing from this build. Rebuild with the CaptureRuntime resource folder.")
-        }
-        return result
-    }
+    var isAvailable: Bool { (try? executable()) != nil }
 
     func call<T: Decodable & Sendable>(_ arguments: [String], timeout: Duration = .seconds(30)) async throws -> T {
-        let runner = ProcessShellRunner(timeout: timeout)
-        let output = try await runner.run(executable(), arguments: ["-B", script().path] + arguments)
+        let output = try await ProcessShellRunner(timeout: timeout).run(executable(), arguments: arguments)
         let data = Data(output.stdout.utf8)
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         if output.exitCode != 0 {
             if let failure = try? decoder.decode(CaptureRuntimeFailure.self, from: data) { throw failure }
-            throw AppError(output.stderr.trimmed.isEmpty ? "Capture runtime failed (exit \(output.exitCode))." : output.stderr.trimmed)
+            throw AppError(output.stderr.trimmed.isEmpty ? "Capture service failed (exit \(output.exitCode))." : output.stderr.trimmed)
         }
         do { return try decoder.decode(T.self, from: data) }
-        catch { throw AppError("The capture runtime returned an unreadable response: \(error.localizedDescription)") }
+        catch { throw AppError("The capture service returned an unreadable response: \(error.localizedDescription)") }
     }
 }
 
@@ -115,7 +89,6 @@ final class CaptureStore {
     var targetApp = ""
     var networkService = ""
     var trustSimulatorCA = false
-    var pythonPath = ""
     var adbPath = ""
     var mitmdumpPath = ""
     var search = "" { didSet { if search != oldValue { scheduleTimelineRefresh() } } }
@@ -124,9 +97,11 @@ final class CaptureStore {
     var selectedEventID: String? { didSet { if selectedEventID != oldValue { loadSelectedEvent() } } }
     var markerText = ""
     private(set) var outputRoot: URL
+    @ObservationIgnored private let hostExecutable: URL?
     @ObservationIgnored private var pollingTask: Task<Void, Never>?
     @ObservationIgnored private var timelineTask: Task<Void, Never>?
     @ObservationIgnored private var detailTask: Task<Void, Never>?
+    @ObservationIgnored private var detailRequest = UUID()
     @ObservationIgnored private var index: NativeTimelineStore?
     @ObservationIgnored private var sessionToken = UUID()
     @ObservationIgnored private var queryRevision: UInt64 = 0
@@ -139,7 +114,8 @@ final class CaptureStore {
     @ObservationIgnored private var windowHasNewer = false
     @ObservationIgnored private var heldMatchingCount: Int?
 
-    init() {
+    init(hostExecutable: URL? = nil) {
+        self.hostExecutable = hostExecutable
         outputRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MobileCapture/Sessions", isDirectory: true)
     }
@@ -153,8 +129,10 @@ final class CaptureStore {
     // The retained window is chronological; reversing never changes the user's following preference.
     var visibleEvents: [NativeTimelineRow] {
         guard timelineMatchesFilters else { return [] }
-        return newestFirst ? Array(events.reversed()) : events
+        return retainedTimelineRows
     }
+    /// Kept behind an opaque loading overlay while filters change, preserving the native viewport.
+    var retainedTimelineRows: [NativeTimelineRow] { newestFirst ? Array(events.reversed()) : events }
     var timelineMatchesFilters: Bool { timeline?.source == sourceFilter && timeline?.search == search }
     var hasOlderEvents: Bool { timelineMatchesFilters && windowHasOlder }
     var hasNewerEvents: Bool { timelineMatchesFilters && windowHasNewer }
@@ -165,6 +143,9 @@ final class CaptureStore {
     var activeTargetName: String {
         if isStarting { return selectedDevice?.name ?? "Preparing selected device" }
         return session?.deviceName ?? selectedDevice?.name ?? "Select a device"
+    }
+    private var collectionHint: String {
+        session?.isActive == true ? "Capture continues." : "All captured evidence is retained."
     }
 
     func toolPath(_ name: String) -> String? { tools[name] ?? nil }
@@ -210,6 +191,11 @@ final class CaptureStore {
             await refreshTimeline(mode: .latest)
             guard let session, URL(fileURLWithPath: session.directory).standardizedFileURL == directory.standardizedFileURL else { return }
             selectedDeviceID = session.platform + ":" + session.deviceId
+            if session.isActive, client.isAvailable {
+                let status: CaptureUpdate = try await client.call(["status", "--session", session.directory])
+                let warnings = status.session.warnings.filter { !session.warnings.contains($0) }
+                if !warnings.isEmpty { error = warnings.joined(separator: "\n") }
+            }
             beginPolling()
         } catch {
             recordFailure(error)
@@ -229,14 +215,16 @@ final class CaptureStore {
                 captureLogs: captureLogs, captureNetwork: captureNetwork, outputRoot: outputRoot.path,
                 targetApp: nonempty(targetApp), networkService: device.platform == "simulator" ? nonempty(networkService) : nil,
                 trustSimulatorCa: device.platform == "simulator" && trustSimulatorCA,
-                adbPath: nonempty(adbPath), mitmdumpPath: nonempty(mitmdumpPath))
+                adbPath: nonempty(adbPath), mitmdumpPath: nonempty(mitmdumpPath),
+                proxyHelperPath: Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("mobile-capture-proxy").path,
+                runtimeDirectory: Bundle.main.resourceURL?.appendingPathComponent("CaptureRuntime").path)
             let requestURL = outputRoot.appendingPathComponent(".start-\(UUID().uuidString).json")
             let encoder = JSONEncoder()
             encoder.keyEncodingStrategy = .convertToSnakeCase
             try encoder.encode(request).write(to: requestURL, options: [.atomic])
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: requestURL.path)
             defer { try? FileManager.default.removeItem(at: requestURL) }
-            let update: CaptureUpdate = try await client.call(["start", "--request", requestURL.path, "--event-limit", "0"], timeout: .seconds(120))
+            let update: CaptureUpdate = try await client.call(["start", "--request", requestURL.path], timeout: .seconds(120))
             session = update.session
             try attachIndex(URL(fileURLWithPath: update.session.directory))
             await refreshTimeline(mode: .latest)
@@ -268,9 +256,9 @@ final class CaptureStore {
         while isAddingMarker { try? await Task.sleep(for: .milliseconds(20)) }
         error = nil
         do {
-            let update: CaptureUpdate = try await client.call(["stop", "--session", current.directory, "--event-limit", "0"], timeout: .seconds(120))
+            let update: CaptureUpdate = try await client.call(["stop", "--session", current.directory], timeout: .seconds(120))
             session = update.session
-            await refreshTimeline(mode: .poll)
+            await refreshTimeline(mode: .presentation)
         } catch { recordFailure(error) }
     }
 
@@ -342,7 +330,7 @@ final class CaptureStore {
         NSWorkspace.shared.activateFileViewerSelecting([file])
     }
 
-    private var client: CaptureRuntimeClient { CaptureRuntimeClient(pythonOverride: pythonPath) }
+    private var client: CaptureRuntimeClient { CaptureRuntimeClient(executableOverride: hostExecutable) }
     private func nonempty(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
@@ -386,6 +374,8 @@ final class CaptureStore {
 
     private func loadSelectedEvent() {
         detailTask?.cancel()
+        detailRequest = UUID()
+        let request = detailRequest
         selectedEvent = nil
         isLoadingSelectedEvent = false
         guard let index, let id = selectedEventID else { return }
@@ -393,14 +383,14 @@ final class CaptureStore {
         isLoadingSelectedEvent = true
         detailTask = Task { [weak self] in
             defer {
-                if let self, token == self.sessionToken, self.selectedEventID == id { self.isLoadingSelectedEvent = false }
+                if let self, token == self.sessionToken, request == self.detailRequest { self.isLoadingSelectedEvent = false }
             }
             do {
                 let event = try await index.event(id: id)
-                guard !Task.isCancelled, let self, token == self.sessionToken, self.selectedEventID == id else { return }
+                guard !Task.isCancelled, let self, token == self.sessionToken, request == self.detailRequest, self.selectedEventID == id else { return }
                 self.selectedEvent = event
             } catch {
-                guard !Task.isCancelled, let self, token == self.sessionToken, self.selectedEventID == id else { return }
+                guard !Task.isCancelled, let self, token == self.sessionToken, request == self.detailRequest, self.selectedEventID == id else { return }
                 self.error = "Could not inspect the selected event: \(error.localizedDescription)"
             }
         }
@@ -418,7 +408,7 @@ final class CaptureStore {
         }
     }
 
-    private enum RefreshMode { case poll, query, latest, older, newer }
+    private enum RefreshMode { case poll, presentation, query, latest, older, newer }
 
     private func query() -> NativeTimelineQuery {
         var query = NativeTimelineQuery()
@@ -428,12 +418,15 @@ final class CaptureStore {
     }
 
     private func refreshTimeline(mode: RefreshMode) async {
+        let token = sessionToken, revision = queryRevision
         if mode == .poll, refreshInFlight { return }
         while refreshInFlight {
             do { try await Task.sleep(for: .milliseconds(20)) } catch { return }
         }
-        guard !Task.isCancelled, let index else { return }
-        let token = sessionToken, revision = queryRevision
+        guard !Task.isCancelled, token == sessionToken, revision == queryRevision, let index else { return }
+        if mode == .older || mode == .newer {
+            guard timelineMatchesFilters, mode == .older ? hasOlderEvents : hasNewerEvents else { return }
+        }
         var query = query()
         refreshInFlight = true
         if mode != .poll { isLoadingTimeline = true }
@@ -463,7 +456,8 @@ final class CaptureStore {
             }
             let page = try await index.query(query)
             guard token == sessionToken, revision == queryRevision, !Task.isCancelled else { return }
-            let replace = changed || mode == .query || mode == .latest || timeline == nil || (mode == .poll && followLatest && !isViewPaused)
+            let replace = changed || mode == .query || mode == .latest || !timelineMatchesFilters
+                || ((mode == .poll || mode == .presentation) && followLatest && !isViewPaused)
             if replace {
                 events = page.rows
                 firstCursor = page.firstCursor; lastCursor = page.lastCursor
@@ -483,12 +477,12 @@ final class CaptureStore {
                 if let latest = page.lastCursor { windowHasNewer = lastCursor != latest }
                 if !changed {
                     let count = max(0, page.matchingCount - (heldMatchingCount ?? page.matchingCount))
-                    presentationHint = isViewPaused ? "View paused. Capture continues." : count > 0 ? "\(count) more matching events. Your reading position is held." : "Reading position held. Capture continues."
+                    presentationHint = isViewPaused ? "View paused. \(collectionHint)" : count > 0 ? "\(count) more matching events. Your reading position is held." : "Reading position held. \(collectionHint)"
                 }
             }
             timeline = CaptureTimeline(source: query.source, search: query.search, totalCount: page.totalCount,
                 matchingCount: page.matchingCount, hasOlder: windowHasOlder)
-            if replace && !changed { presentationHint = isViewPaused ? "View paused. Capture continues." : followLatest ? nil : "Reading position held." }
+            if replace && !changed { presentationHint = isViewPaused ? "View paused. \(collectionHint)" : followLatest ? nil : "Reading position held." }
             if error?.hasPrefix("Timeline unavailable:") == true { error = nil }
         } catch {
             guard token == sessionToken, revision == queryRevision, !Task.isCancelled else { return }
@@ -502,7 +496,7 @@ final class CaptureStore {
         guard followLatest else { return }
         followLatest = false
         heldMatchingCount = timeline?.matchingCount
-        presentationHint = "Reading position held. Capture continues."
+        presentationHint = "Reading position held. \(collectionHint)"
     }
 
     func setFollowLatest(_ enabled: Bool) async {
@@ -511,7 +505,7 @@ final class CaptureStore {
             pauseThroughSequence = nil; isViewPaused = false
             queryRevision &+= 1
             await refreshTimeline(mode: .latest)
-        } else { heldMatchingCount = timeline?.matchingCount; presentationHint = "Reading position held. Capture continues." }
+        } else { heldMatchingCount = timeline?.matchingCount; presentationHint = "Reading position held. \(collectionHint)" }
     }
 
     func jumpToLatest() async {
@@ -531,7 +525,7 @@ final class CaptureStore {
                 pauseThroughSequence = snapshot.latestSequence; isViewPaused = true
             }
             queryRevision &+= 1
-            await refreshTimeline(mode: .poll)
+            await refreshTimeline(mode: .presentation)
         } catch { recordFailure(error) }
     }
 
