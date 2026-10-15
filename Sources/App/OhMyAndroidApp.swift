@@ -14,6 +14,7 @@ struct OhMyAndroidApp: App {
             SettingsView().environment(delegate.model).environment(delegate.updates)
         }
         .commands {
+            CaptureCommands()
             CommandGroup(after: .newItem) {
                 Button("Capture Network & Logs…") { delegate.openCapture() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])

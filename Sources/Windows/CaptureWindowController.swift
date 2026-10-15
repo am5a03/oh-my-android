@@ -11,7 +11,9 @@ final class CaptureWindowController {
     var hasActiveCapture: Bool { store.hasActiveCapture }
 
     func show() {
+        CaptureCommandTarget.shared.register(window: tool.window, store: store)
         tool.present(subtitle: "Android + iOS Simulator · Prototype")
+        CaptureCommandMenu.shared.install()
         if !store.didDiscover, !store.hasActiveCapture { Task { await store.refreshDevices() } }
     }
 

@@ -1,0 +1,171 @@
+import AppKit
+import Combine
+import Observation
+import SwiftUI
+
+/// SwiftUI focused scene values do not reach commands from our manually hosted AppKit windows.
+/// Register capture windows explicitly; native key/main windows determine the menu target.
+@MainActor
+@Observable
+final class CaptureCommandTarget: NSObject, @MainActor ObservableObject {
+    static let shared = CaptureCommandTarget()
+    // Commands belong to a SwiftUI scene, while our windows use NSHostingView. Publish native changes
+    // explicitly across that boundary in addition to Observation's property tracking.
+    @ObservationIgnored let objectWillChange = ObservableObjectPublisher()
+    private var windowRevision: UInt64 = 0
+    @ObservationIgnored private let keyWindowProvider: () -> NSWindow?
+    @ObservationIgnored private let mainWindowProvider: () -> NSWindow?
+    @ObservationIgnored private var registrations: [ObjectIdentifier: Registration] = [:]
+
+    private struct Registration {
+        weak var window: NSWindow?
+        weak var store: CaptureStore?
+    }
+
+    var captureStore: CaptureStore? {
+        // Track even the no-target state. Resolve fresh when menu tracking temporarily removes key status.
+        _ = windowRevision
+        let key = keyWindowProvider()
+        let main = mainWindowProvider()
+        let candidate: NSWindow?
+        if let key {
+            // Any other key window, including a sheet or floating panel, vetoes the main-window fallback.
+            candidate = key
+        } else {
+            candidate = main
+        }
+        let store: CaptureStore?
+        if let candidate, candidate.attachedSheet == nil,
+           let registration = registrations[ObjectIdentifier(candidate)], registration.window === candidate {
+            store = registration.store
+        } else { store = nil }
+        return store
+    }
+
+    init(keyWindowProvider: @escaping () -> NSWindow? = { NSApp.keyWindow },
+         mainWindowProvider: @escaping () -> NSWindow? = { NSApp.mainWindow }) {
+        self.keyWindowProvider = keyWindowProvider
+        self.mainWindowProvider = mainWindowProvider
+        super.init()
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
+                     NSWindow.didBecomeMainNotification, NSWindow.didResignMainNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(windowStatusChanged), name: name, object: nil)
+        }
+        NotificationCenter.default.addObserver(self, selector: #selector(windowWillClose),
+            name: NSWindow.willCloseNotification, object: nil)
+    }
+
+    func register(window: NSWindow, store: CaptureStore) {
+        registrations = registrations.filter { $0.value.window != nil && $0.value.store != nil }
+        registrations[ObjectIdentifier(window)] = Registration(window: window, store: store)
+        refresh()
+    }
+
+    @objc private func windowStatusChanged(_ notification: Notification) {
+        refresh()
+    }
+
+    @objc private func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        registrations.removeValue(forKey: ObjectIdentifier(window))
+        refresh()
+    }
+
+    private func refresh() {
+        objectWillChange.send()
+        windowRevision &+= 1
+    }
+}
+
+/// Menu validation must run in AppKit: SwiftUI disables scene commands for a manually hosted window.
+@MainActor
+final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
+    static let shared = CaptureCommandMenu(target: .shared)
+    private static let identifier = NSUserInterfaceItemIdentifier("mobile-capture.commands")
+    private let target: CaptureCommandTarget
+    private(set) var menu = NSMenu(title: "Capture")
+    private var isInstalling = false
+
+    private enum Action: Int {
+        case openSession = 1, start, stop, export, showZIP, showCertificate
+    }
+
+    init(target: CaptureCommandTarget) {
+        self.target = target
+        super.init()
+        menu.delegate = self
+        menu.autoenablesItems = true
+        add("Open Session…", action: .openSession)
+        menu.addItem(.separator())
+        add("Start Capture", action: .start)
+        add("Stop & Save", action: .stop, keyEquivalent: ".")
+        menu.addItem(.separator())
+        add("Export ZIP…", action: .export)
+        add("Show ZIP in Finder", action: .showZIP)
+        add("Show Capture Certificate in Finder…", action: .showCertificate)
+        for name in [NSApplication.didBecomeActiveNotification, NSApplication.didUpdateNotification,
+                     NSWindow.didBecomeKeyNotification, NSWindow.didBecomeMainNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(nativeContextChanged), name: name, object: nil)
+        }
+    }
+
+    func install() {
+        guard !isInstalling, let mainMenu = NSApp.mainMenu else { return }
+        guard !mainMenu.items.contains(where: { $0.identifier == Self.identifier }) else { return }
+        isInstalling = true
+        defer { isInstalling = false }
+        if let previous = menu.supermenu, let previousItem = previous.items.first(where: { $0.submenu === menu }) {
+            previous.removeItem(previousItem)
+        }
+        let item = NSMenuItem(title: "Capture", action: nil, keyEquivalent: "")
+        item.identifier = Self.identifier
+        item.submenu = menu
+        let index = mainMenu.items.firstIndex { $0.submenu === NSApp.windowsMenu } ?? min(2, mainMenu.items.count)
+        mainMenu.insertItem(item, at: index)
+    }
+
+    private func add(_ title: String, action: Action, keyEquivalent: String = "") {
+        let item = NSMenuItem(title: title, action: #selector(performCaptureAction), keyEquivalent: keyEquivalent)
+        item.target = self
+        item.tag = action.rawValue
+        menu.addItem(item)
+    }
+
+    @objc private func nativeContextChanged(_ notification: Notification) { install() }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        for item in menu.items where !item.isSeparatorItem { item.isEnabled = validateMenuItem(item) }
+    }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        guard let action = Action(rawValue: item.tag), let store = target.captureStore else { return false }
+        switch action {
+        case .openSession: return !store.isBusy && !store.hasActiveCapture
+        case .start: return store.canStart
+        case .stop:
+            item.title = if store.session?.needsRoutingRecovery == true { "Restore Connection & Save" }
+                else if !store.hasActiveCapture && store.session?.needsPackageRetry == true { "Retry Save" }
+                else { "Stop & Save" }
+            return !store.isBusy && store.session?.canFinalize == true
+        case .export, .showZIP: return store.session?.packagePath != nil
+        case .showCertificate: return store.session?.caCertificatePath != nil
+        }
+    }
+
+    @objc private func performCaptureAction(_ sender: NSMenuItem) {
+        guard validateMenuItem(sender), let action = Action(rawValue: sender.tag), let store = target.captureStore else { return }
+        switch action {
+        case .openSession: Task { await store.openSession() }
+        case .start: Task { await store.start() }
+        case .stop: Task { await store.stop() }
+        case .export: store.exportPackage()
+        case .showZIP: store.revealPackage()
+        case .showCertificate: store.revealCaptureCertificate()
+        }
+    }
+}
+
+/// Kept at the App scene declaration; capture commands themselves use native menu validation above.
+struct CaptureCommands: Commands {
+    var body: some Commands { CommandGroup(after: .newItem) {} }
+}

@@ -4,6 +4,8 @@ import SwiftUI
 struct CaptureView: View {
     @Bindable var store: CaptureStore
     @State private var showRuntimeSettings = false
+    @State private var showCaptureWarnings = false
+    @State private var isStopping = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -12,24 +14,16 @@ struct CaptureView: View {
             sessionStatus
             if let error = store.error { notice(error, symbol: "exclamationmark.triangle.fill", color: .red) }
             if let session = store.session {
-                ForEach(Array(session.warnings.enumerated()), id: \.offset) { _, warning in
-                    notice(warning, symbol: "exclamationmark.triangle", color: .orange)
-                }
-                if session.platform == "android", session.caCertificatePath != nil {
-                    HStack {
-                        Button("Reveal Capture CA Certificate…") { store.revealCaptureCertificate() }
-                        Text("Install this public CA on the device. The test app must also trust it.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 4)
-                }
                 if session.routingRestored == false {
-                    notice("Network routing has not been restored. Follow the session warning before disconnecting.", symbol: "network.slash", color: .red)
+                    notice("Connection needs recovery. Choose Restore Connection & Save before disconnecting the device.", symbol: "network.slash", color: .red)
+                    ForEach(Array(session.warnings.filter { $0.hasPrefix("Routing recovery still required:") }.enumerated()), id: \.offset) { _, warning in
+                        notice(warning, symbol: "exclamationmark.triangle.fill", color: .red)
+                    }
                 }
                 if session.needsPackageRetry, !store.hasActiveCapture {
                     notice("The ZIP is not available. Use Retry Save to package the existing capture evidence.", symbol: "archivebox", color: .orange)
                 }
+                captureWarnings(session)
             }
             Divider()
             timeline
@@ -37,32 +31,148 @@ struct CaptureView: View {
             footer
         }
         .frame(minWidth: 960, minHeight: 680)
+        .onChange(of: store.session?.id) { showCaptureWarnings = false }
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button { Task { await store.openSession() } } label: { Label("Open Session…", systemImage: "folder") }
-                    .disabled(store.hasActiveCapture || store.isBusy)
-                if store.hasActiveCapture {
-                    Button { Task { await store.stop() } } label: {
-                        Label(store.session?.needsRoutingRecovery == true && store.session?.isActive == false ? "Retry Cleanup & Save" : "Stop & Save", systemImage: "stop.circle.fill")
-                    }
-                        .disabled(store.isBusy)
-                        .keyboardShortcut(".", modifiers: .command)
-                } else {
-                    if store.session?.needsPackageRetry == true {
-                        Button { Task { await store.stop() } } label: { Label("Retry Save", systemImage: "arrow.clockwise") }
-                            .disabled(store.isBusy)
-                    }
-                    Button { Task { await store.start() } } label: { Label("Start Capture", systemImage: "record.circle") }
-                        .disabled(!store.canStart)
+            ToolbarItem(placement: .navigation) {
+                Button { Task { await store.openSession() } } label: {
+                    toolbarLabel("Open Session…", symbol: "folder")
                 }
-                Button { store.revealPackage() } label: { Label("Reveal ZIP", systemImage: "folder") }
+                    .disabled(store.hasActiveCapture || store.isBusy)
+                    .help(openSessionHelp)
+                    .accessibilityLabel("Open Session")
+                    .accessibilityHint(openSessionHelp)
+            }
+            ToolbarItemGroup(placement: .automatic) {
+                Button { store.exportPackage() } label: {
+                    toolbarLabel("Export ZIP…", symbol: "archivebox")
+                }
                     .disabled(store.session?.packagePath == nil)
-                Button { store.exportPackage() } label: { Label("Export…", systemImage: "square.and.arrow.up") }
-                    .disabled(store.session?.packagePath == nil)
+                    .help(exportHelp)
+                    .accessibilityHint(exportHelp)
+                Menu {
+                    Button("Show ZIP in Finder", systemImage: "folder") { store.revealPackage() }
+                        .disabled(store.session?.packagePath == nil)
+                        .help(store.session?.packagePath == nil ? "Stop and save a capture to create its ZIP." : "Select the saved ZIP in Finder.")
+                    if store.session?.caCertificatePath != nil {
+                        Button("Show Capture Certificate in Finder…", systemImage: "certificate") { store.revealCaptureCertificate() }
+                            .help("Locate the public capture certificate to install on the device. This file contains no private key.")
+                    }
+                } label: {
+                    toolbarLabel("Session", symbol: "ellipsis")
+                }
+                .help("Show the saved ZIP or capture certificate in Finder.")
             }
             ToolbarItem(placement: .status) {
-                if store.isBusy { ProgressView().controlSize(.small) }
+                if store.isBusy {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text(operationTitle).font(.caption)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
             }
+            ToolbarItem(placement: .primaryAction) {
+                if store.hasActiveCapture || store.session?.needsPackageRetry == true {
+                    Button { Task { await stopCapture() } } label: {
+                        toolbarLabel(stopTitle, symbol: store.hasActiveCapture ? "stop.fill" : "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(store.isBusy)
+                    .keyboardShortcut(".", modifiers: .command)
+                    .help(stopHelp)
+                    .accessibilityHint(stopHelp)
+                } else {
+                    Button { Task { await store.start() } } label: {
+                        toolbarLabel("Start Capture", symbol: "record.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!store.canStart)
+                    .help(startHelp)
+                    .accessibilityHint(startHelp)
+                }
+            }
+        }
+    }
+
+    /// An explicit HStack keeps these action names visible in an icon-only toolbar configuration.
+    private func toolbarLabel(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol).accessibilityHidden(true)
+            Text(title)
+        }
+    }
+
+    private var openSessionHelp: String {
+        if store.hasActiveCapture { return "Stop and save the current capture before opening another session." }
+        if store.isBusy { return "Wait for the current operation to finish, then open a saved capture folder." }
+        return "Open a saved capture folder to inspect its timeline or recover an interrupted capture."
+    }
+
+    private var startHelp: String {
+        if store.isBusy { return "Wait for the current operation to finish." }
+        if store.hasActiveCapture { return "Stop and save the current capture before starting another." }
+        guard let device = store.selectedDevice else { return "Choose a connected device to start capturing." }
+        if !device.isReady { return "The selected device is not ready. Unlock it, authorize the computer, then refresh devices." }
+        if !store.captureLogs && !store.captureNetwork { return "Select Device Logs, Network Requests & Responses, or both." }
+        if store.captureNetwork && device.platform == "simulator" && store.networkService.isEmpty {
+            return "Choose the Mac network service used by the Simulator before starting network capture."
+        }
+        return "Record the selected sources from \(device.name). Stop & Save restores the connection and creates one evidence ZIP."
+    }
+
+    private var exportHelp: String {
+        store.session?.packagePath == nil
+            ? "Stop and save a capture to create a ZIP, then export a copy."
+            : "Save a copy of the complete evidence ZIP to a location you choose."
+    }
+
+    private var stopTitle: String {
+        if store.session?.needsRoutingRecovery == true { return "Restore Connection & Save" }
+        if !store.hasActiveCapture && store.session?.needsPackageRetry == true { return "Retry Save" }
+        return "Stop & Save"
+    }
+
+    private var stopHelp: String {
+        if store.isBusy { return "Wait for the current operation to finish. The capture remains available here." }
+        if store.session?.needsRoutingRecovery == true { return "Restore the original connection settings, stop collectors, and save the evidence ZIP." }
+        if store.session?.needsPackageRetry == true && !store.hasActiveCapture { return "Create a ZIP from the evidence already saved in this session." }
+        return "Stop recording, restore the original connection settings, and create one evidence ZIP."
+    }
+
+    private var operationTitle: String {
+        if store.isStarting { return "Preparing capture…" }
+        if isStopping { return store.session?.needsRoutingRecovery == true ? "Restoring connection and saving…" : "Stopping and saving…" }
+        return "Updating session…"
+    }
+
+    private func stopCapture() async {
+        isStopping = true
+        defer { isStopping = false }
+        await store.stop()
+    }
+
+    @ViewBuilder
+    private func captureWarnings(_ session: CaptureSession) -> some View {
+        let warnings = session.warnings.filter { session.routingRestored != false || !$0.hasPrefix("Routing recovery still required:") }
+        if !warnings.isEmpty {
+            DisclosureGroup(isExpanded: $showCaptureWarnings) {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
+                        Text(warning).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                    }
+                    if session.platform == "android", session.caCertificatePath != nil {
+                        Button("Show Capture Certificate in Finder…") { store.revealCaptureCertificate() }
+                        Text("Install this public certificate on the device. The test app must also trust it.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.top, 8)
+            } label: {
+                Label("\(warnings.count) Capture \(warnings.count == 1 ? "Warning" : "Warnings")", systemImage: "exclamationmark.triangle")
+            }
+            .font(.caption)
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(.quaternary)
         }
     }
 
@@ -154,8 +264,14 @@ struct CaptureView: View {
     private var sessionStatus: some View {
         HStack(spacing: 18) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(store.isStarting ? "Preparing capture…" : (store.session?.phase.capitalized ?? "Ready to prepare")).font(.headline)
+                Text(phaseTitle).font(.headline)
                 Text(store.activeTargetName).font(.caption).foregroundStyle(.secondary)
+                if !store.canStart && !store.hasActiveCapture && !store.isBusy && store.session?.needsPackageRetry != true {
+                    Text(startHelp).font(.caption).foregroundStyle(.secondary)
+                } else if store.session?.isActive == true {
+                    Text("Stop & Save creates the ZIP for export. Closing this window keeps recording.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if let session = store.session {
                     Text(session.directory).font(.caption2).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
@@ -163,7 +279,7 @@ struct CaptureView: View {
                 }
             }
             Spacer()
-            sourceStatus("Logs", source: "logs")
+            sourceStatus("Device Logs", source: "logs")
             sourceStatus("Network", source: "network")
             if let session = store.session {
                 Text("\(session.counts["markers", default: 0]) markers").font(.caption).foregroundStyle(.secondary)
@@ -172,13 +288,39 @@ struct CaptureView: View {
         .padding(.horizontal, 16).padding(.vertical, 10)
     }
 
+    private var phaseTitle: String {
+        if store.isStarting { return "Preparing Capture…" }
+        if isStopping { return store.session?.needsRoutingRecovery == true ? "Restoring Connection & Saving…" : "Stopping & Saving…" }
+        guard let session = store.session else { return "Ready to Capture" }
+        if session.needsRoutingRecovery { return "Connection Needs Recovery" }
+        return switch session.phase {
+        case "preparing": "Preparing Capture…"
+        case "recording": "Recording"
+        case "stopping": "Stopping & Saving…"
+        case "saved": "Saved"
+        case "partial": session.packagePath == nil ? "Capture Needs Saving" : "Saved with Warnings"
+        case "failed": session.packagePath == nil ? "Capture Failed · Evidence May Be Available" : "Saved after Capture Failure"
+        default: "Capture Session"
+        }
+    }
+
     private func sourceStatus(_ title: String, source: String) -> some View {
         let status = store.session?.sources[source] ?? "not_selected"
         let color: Color = status == "observed" ? .green : (["failed", "interrupted", "tls_failed"].contains(status) ? .red : (status == "started" ? .blue : .secondary))
+        let statusTitle = switch status {
+        case "observed": store.session?.isActive == true ? "Receiving" : "Captured"
+        case "started": store.session?.isActive == true ? "Waiting for Events" : "No Events Captured"
+        case "preparing": "Preparing"
+        case "failed": "Capture Failed"
+        case "interrupted": "Interrupted"
+        case "tls_failed": "Check Certificate Trust"
+        case "not_selected": "Not Selected"
+        default: "Status Unavailable"
+        }
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 5) {
                 Circle().fill(color).frame(width: 6, height: 6)
-                Text("\(title): \(status.replacingOccurrences(of: "_", with: " "))")
+                Text("\(title): \(statusTitle)")
             }
             Text("\(store.session?.counts[source] ?? 0) events").foregroundStyle(.secondary)
         }
@@ -226,17 +368,32 @@ struct CaptureView: View {
                 eventList.frame(minWidth: 460)
                 eventDetail.frame(minWidth: 290, idealWidth: 350)
             }
-            HStack(spacing: 8) {
-                Image(systemName: "bookmark")
-                TextField("Mark an action, placement or reproduction step…", text: $store.markerText)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { Task { await store.addMarker() } }
-                Button("Add Marker") { Task { await store.addMarker() } }
-                    .disabled(store.session?.isActive != true || store.isBusy || store.markerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(store.session?.isActive == true ? "Add a note at the current time. Selecting a row only opens its details." : "Start recording to add a time marker.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Image(systemName: "bookmark").accessibilityHidden(true)
+                    TextField("For example: Tapped the banner ad", text: $store.markerText)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel("Marker note at the current time")
+                        .help("Type a note while recording, then choose Add Marker or press Return. The marker uses the current time, not the selected row’s time.")
+                        .onSubmit { Task { await store.addMarker() } }
+                    Button("Add Marker") { Task { await store.addMarker() } }
+                        .disabled(store.session?.isActive != true || store.isBusy || store.markerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .help(markerHelp)
+                        .accessibilityHint(markerHelp)
+                }
+                .disabled(store.session?.isActive != true)
             }
-            .disabled(store.session?.isActive != true)
             .padding(12)
         }
+    }
+
+    private var markerHelp: String {
+        if store.session?.isActive != true { return "Start recording to add a marker at the current time." }
+        if store.isBusy { return "Wait for the current operation to finish, then add your note." }
+        if store.markerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Type a note first, such as Tapped the banner ad." }
+        return "Add your note at the current time. Choose All Sources or Markers to see it in the timeline."
     }
 
     @ViewBuilder
