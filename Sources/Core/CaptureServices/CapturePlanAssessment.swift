@@ -26,7 +26,7 @@ nonisolated struct CapturePlanEvidence: Sendable {
     mutating func observeHTTP(url: String, statusCode: Int?, requestBodyAvailable: Bool,
                               responseBodyAvailable: Bool, isSetupProbe: Bool = false) {
         guard !isSetupProbe, requestBodyAvailable, responseBodyAvailable,
-              let statusCode, (100...599).contains(statusCode),
+              let statusCode, (200...599).contains(statusCode),
               let components = URLComponents(string: url), components.scheme?.lowercased() == "https",
               let host = components.host?.lowercased(), !host.isEmpty else { return }
         decodedHTTPSExchanges += 1

@@ -108,6 +108,7 @@ struct CapturePlanTests {
         evidence.observeHTTP(url: "http://example.com/", statusCode: 200, requestBodyAvailable: true, responseBodyAvailable: true)
         evidence.observeHTTP(url: "https://example.com/", statusCode: nil, requestBodyAvailable: true, responseBodyAvailable: true)
         evidence.observeHTTP(url: "https://example.com/", statusCode: 200, requestBodyAvailable: true, responseBodyAvailable: false)
+        evidence.observeHTTP(url: "https://example.com/", statusCode: 101, requestBodyAvailable: true, responseBodyAvailable: true)
         #expect(evidence.decodedHTTPSExchanges == 0 && evidence.observedRequestHosts.isEmpty)
         evidence.observeHTTP(url: "https://sub.example.com/", statusCode: 200, requestBodyAvailable: true, responseBodyAvailable: true)
         #expect(evidence.decodedHTTPSExchanges == 1 && evidence.observedRequestHosts.isEmpty)
