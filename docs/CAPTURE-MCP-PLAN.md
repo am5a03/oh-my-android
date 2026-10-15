@@ -43,7 +43,11 @@ flowchart LR
     Host --> ZIP[Existing evidence ZIP]
 ```
 
-Ship a dedicated `mobile-capture-mcp` executable alongside the existing helpers.
+Ship a dedicated `mobile-capture-mcp` executable alongside the existing helpers
+inside the independent `Mobile Capture.app` described in the
+[standalone app plan](CAPTURE-STANDALONE-PLAN.md). It must work without Oh My
+Android installed. Oh My Android's optional companion integration opens the app
+through a versioned handoff; capture control stays in this service/MCP contract.
 Reuse the MCP protocol implementation through an injectable catalog, server
 identity and service environment. Keep the existing Android MCP compatible.
 Capture use must not require an Android SDK when the chosen device is an iPhone
@@ -252,3 +256,4 @@ commits. Keep routing and lifecycle mutation under one owner.
 - [MCP cancellation](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/cancellation)
   and [progress](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/progress).
 - [Logging implementation and deferred checks](CAPTURE-LOGGING-PLAN.md).
+- [Standalone application ownership and optional launcher](CAPTURE-STANDALONE-PLAN.md).
