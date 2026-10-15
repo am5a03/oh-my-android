@@ -10,6 +10,7 @@ cp Sources/Core/CaptureModels.swift Sources/Core/Capture/NativeTimelineModels.sw
 cp Tests/NativeCaptureServicesTests.swift "$work/Tests/NativeCaptureServicesTests/"
 cp Tests/CaptureLogDiscoveryTests.swift "$work/Tests/NativeCaptureServicesTests/"
 cp Tests/CaptureSetupEvidenceTests.swift "$work/Tests/NativeCaptureServicesTests/"
+cp Tests/CaptureReadinessExportTests.swift "$work/Tests/NativeCaptureServicesTests/"
 cat > "$work/Package.swift" <<'SWIFT'
 // swift-tools-version: 6.3
 import PackageDescription

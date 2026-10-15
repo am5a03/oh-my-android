@@ -5,6 +5,48 @@ import Testing
 
 @Suite("Native capture host lifecycle")
 struct NativeCaptureLifecycleTests {
+    @Test func invalidSetupContextFailsBeforeCreatingSessionOrTouchingRouting() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let path = try fixture.request(platform: "android")
+        var request = try CaptureLifecycleFiles.read(NativeCaptureRequest.self, at: path)
+        request.setup_context = .init(purpose: .check, probeNonce: "invalid-nonce")
+        try CaptureLifecycleFiles.write(request, at: path)
+        let before = try? Data(contentsOf: fixture.root.appendingPathComponent("routing.json"))
+        let result = try await fixture.call(["start", "--request", path.path])
+        #expect(result.session == nil)
+        #expect(result.error != nil)
+        #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("sessions").path))
+        #expect((try? Data(contentsOf: fixture.root.appendingPathComponent("routing.json"))) == before)
+    }
+
+    @Test func publicCertificateTransferRequiresLiveOwnedAndroidSessionAndRejectsPrivateMaterial() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let path = try fixture.request(platform: "android")
+        var request = try CaptureLifecycleFiles.read(NativeCaptureRequest.self, at: path)
+        request.setup_context = .init(purpose: .check, probeNonce: String(repeating: "a", count: 32))
+        try CaptureLifecycleFiles.write(request, at: path)
+        let started = try await fixture.call(["start", "--request", path.path])
+        let directory = URL(fileURLWithPath: try #require(started.session?.text("directory")))
+        let copied = try await fixture.call(["transfer-ca", "--session", directory.path])
+        #expect(copied.error == nil)
+        let publicCA = try Data(contentsOf: directory.appendingPathComponent("setup/capture-ca-cert.pem"))
+        #expect(try Data(contentsOf: fixture.root.appendingPathComponent("transferred-ca.crt")) == publicCA)
+        let destination = try #require(fixture.json("certificate-transfer.json")["destination"] as? String)
+        #expect(destination.hasPrefix("/sdcard/Download/mobile-capture-ca-") && destination.hasSuffix(".crt"))
+        try Data("-----BEGIN CERTIFICATE-----\nPRIVATE KEY\n".utf8).write(to: directory.appendingPathComponent("setup/capture-ca-cert.pem"))
+        let refused = try await fixture.call(["transfer-ca", "--session", directory.path])
+        #expect(refused.error != nil)
+        #expect(try Data(contentsOf: fixture.root.appendingPathComponent("transferred-ca.crt")) == publicCA)
+        try publicCA.write(to: directory.appendingPathComponent("setup/capture-ca-cert.pem"))
+        let stopped = try await fixture.call(["stop", "--session", directory.path])
+        #expect(stopped.session?.text("package_path") != nil)
+        let stale = try await fixture.call(["transfer-ca", "--session", directory.path])
+        #expect(stale.error != nil)
+        #expect(try Data(contentsOf: fixture.root.appendingPathComponent("transferred-ca.crt")) == publicCA)
+    }
+
     @Test func workerEnforcesByteAndDiagnosticCapsBeforePersistence() async throws {
         let fixture = try LifecycleFixture()
         defer { fixture.cleanup() }

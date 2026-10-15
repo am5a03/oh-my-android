@@ -47,6 +47,14 @@ if kind == "adb" {
     if arguments == ["devices", "-l"] { text("List of devices attached\nfixture-device device model:Fixture_Phone"); exit(0) }
     guard arguments.prefix(2) == ["-s", "fixture-device"] else { fail("Unexpected device selection") }
     let args = Array(arguments.dropFirst(2))
+    if args == ["get-state"] { text("device"); exit(0) }
+    if args.first == "push", args.count == 3 {
+        let source = URL(fileURLWithPath: args[1])
+        let bytes = try! Data(contentsOf: source)
+        try! bytes.write(to: root.appendingPathComponent("transferred-ca.crt"))
+        writeJSON(["destination": args[2]], "certificate-transfer.json")
+        text("1 file pushed"); exit(0)
+    }
     if let mode = readJSON("faults.json")["app_scope_mode"] as? String {
         let package = "codePath=/data/app/verified\nfirstInstallTime=2026-01-01 00:00:00\nlastUpdateTime=2026-01-01 00:00:00"
         if args == ["shell", "am", "get-current-user"] { text("0"); exit(0) }
@@ -174,7 +182,7 @@ if kind == "mitmdump" {
         writeJSON(["arguments": arguments, "key_path": keyPath], "iphone-network-invocation.json")
     }
     let ca = arguments.first(where: { $0.hasPrefix("confdir=") })!.dropFirst(8)
-    try! Data("PUBLIC FIXTURE CERTIFICATE".utf8).write(to: URL(fileURLWithPath: String(ca)).appendingPathComponent("mitmproxy-ca-cert.pem"))
+    try! Data("-----BEGIN CERTIFICATE-----\nPUBLIC FIXTURE CERTIFICATE\n-----END CERTIFICATE-----\n".utf8).write(to: URL(fileURLWithPath: String(ca)).appendingPathComponent("mitmproxy-ca-cert.pem"))
     try! Data([0, 1, 2, 255]).write(to: network.appendingPathComponent("capture.mitm"))
     try! Data(#"{"log":{"entries":[]}}"#.utf8).write(to: network.appendingPathComponent("capture.har"))
     try! Data(#"{"flow_ids":[],"count":0,"missing_bodies":[]}"#.utf8).write(to: network.appendingPathComponent("incomplete.json"))
