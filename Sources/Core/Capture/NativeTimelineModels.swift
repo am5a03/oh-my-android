@@ -41,6 +41,8 @@ struct NativeTimelineSnapshot: Sendable {
     let generation: Int64
     let networkDiagnostics: [String: Int]
     var observedLogEvents: Int? = nil
+    /// Timestamped parsed device records only; headers and collector notices do not prove setup.
+    var parsedLogEvents: Int? = nil
     /// Raw bytes not yet read by the disposable index; collectors retain the complete evidence.
     var pendingBytes: Int64 = 0
 }

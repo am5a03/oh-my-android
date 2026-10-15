@@ -28,6 +28,7 @@ struct CaptureStartRequest: Encodable, Sendable {
     let iphoneEndpointHost: String?
     let loggingPolicy: CaptureLoggingPolicy?
     let logScope: CaptureLogScope?
+    var setupContext: CaptureSessionSetupContext? = nil
 }
 
 /// The app talks to a compiled sibling helper. JSON carries session metadata, never captured bodies.

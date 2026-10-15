@@ -149,7 +149,7 @@ struct NativeCaptureServicesTests {
         let archive = try await CaptureEvidenceExporter().export(sessionDirectory: fixture.session, manifestJSON: fixture.manifest(), normalizedTimeline: fixture.timeline)
         let output = try await fixture.extract(archive)
         let paths = try await ProcessShellRunner().run(URL(fileURLWithPath: "/usr/bin/unzip"), arguments: ["-Z1", archive.path])
-        let expected = Set(CaptureEvidenceExporter.rawPaths + ["timeline/events.jsonl", "manifest.json", "context.json", "README.txt", "SHA256SUMS"])
+        let expected = Set(CaptureEvidenceExporter.rawPaths + ["timeline/events.jsonl", "manifest.json", "context.json", "README.txt", "ENGINEER-SUMMARY.txt", "SHA256SUMS"])
         #expect(Set(paths.stdout.split(separator: "\n").map(String.init)) == expected)
         for relative in CaptureEvidenceExporter.rawPaths {
             #expect(try Data(contentsOf: fixture.session.appendingPathComponent(relative)) == Data(contentsOf: output.appendingPathComponent(relative)))
@@ -198,7 +198,7 @@ struct NativeCaptureServicesTests {
         #expect(completeness["pending_flow_ids"] as? [String] == ["unfinished"])
         #expect(completeness["network_error_refs"] as? [String] == ["network/events.jsonl#L3"])
         #expect(completeness["unknown_clock_events"] as? Int == 1)
-        #expect(manifest["network_diagnostics"] as? [String: Int] == ["decoded_http_events": 2, "tls_errors": 1, "certificate_rejections": 1, "request_errors": 0])
+        #expect(manifest["network_diagnostics"] as? [String: Int] == ["decoded_http_events": 2, "decoded_https_responses": 0, "setup_https_responses": 0, "tls_errors": 1, "certificate_rejections": 1, "request_errors": 0])
     }
 
     @Test func exporterSeparatesCompanionStatusAndRetainsEndedLogCoverage() async throws {

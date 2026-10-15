@@ -9,6 +9,19 @@ enum NativeCaptureHost {
             throw AppError("Select an explicit Android device, iPhone or Simulator, capture sources and an absolute output directory.")
         }
         if request.capture_logs { _ = try (request.logging_policy ?? CaptureLoggingPolicy()).validated() }
+        if let setup = request.setup_context {
+            _ = try setup.validated()
+            if let plan = setup.plan {
+                guard plan.platform.rawValue == request.platform, plan.applicationID == request.target_app else {
+                    throw AppError("The capture task does not match the selected app and device platform.")
+                }
+                if request.capture_logs {
+                    guard let scope = request.log_scope, scope.mode == .app, scope.applicationID == plan.applicationID else {
+                        throw AppError("This capture task requires logs scoped to its selected app.")
+                    }
+                }
+            }
+        }
         let root = URL(fileURLWithPath: request.output_root).standardizedFileURL
         try CaptureLifecycleFiles.privateDirectory(root)
         let identifier = UUID().uuidString.lowercased()
@@ -27,6 +40,9 @@ enum NativeCaptureHost {
             "network_service": request.network_service.map(CaptureStateValue.string) ?? .null,
             "capture_logs": .bool(request.capture_logs), "capture_network": .bool(request.capture_network),
             "coordinator": .string("native"), "coordinator_version": .number(1)]
+        if let setup = request.setup_context {
+            state["context"] = .object(["capture_setup": try stateValue(setup)])
+        }
         try save(state, directory)
         try CaptureLifecycleFiles.write(request, at: directory.appendingPathComponent("runtime/request.json"))
         let control = CaptureHostControl(socket: "/tmp/capture-\(identifier).sock", token: CaptureHostSocket.token())
@@ -284,7 +300,12 @@ enum NativeCaptureHost {
             let mode = tunnel.map { "wireguard:\($0.serverConfiguration.path)@\($0.port)" } ?? "regular"
             // WireGuard startup otherwise logs a complete private client profile.
             let command = [mitmdump, "--quiet", "--listen-host", tunnel == nil ? "127.0.0.1" : "0.0.0.0", "--listen-port", String(port), "--mode", mode, "--set", "confdir=\(ca.path)", "--set", "connection_strategy=lazy", "--set", "store_streamed_bodies=true", "-w", directory.appendingPathComponent("network/capture.mitm").path, "-s", addon.path]
-            workers["network"] = try startWorker(directory: directory, name: "network", command: command, executable: executable, environment: ["CAPTURE_SESSION_DIR": directory.path])
+            var networkEnvironment = ["CAPTURE_SESSION_DIR": directory.path]
+            if let setup = request.setup_context, setup.purpose == .check, let nonce = setup.probeNonce {
+                networkEnvironment["CAPTURE_SETUP_NONCE"] = nonce
+                networkEnvironment["CAPTURE_SETUP_TRANSPORT"] = request.platform == "iphone" ? "iphone_wireguard" : request.platform == "android" ? "android_reverse" : "simulator_proxy"
+            }
+            workers["network"] = try startWorker(directory: directory, name: "network", command: command, executable: executable, environment: networkEnvironment)
             let ready = directory.appendingPathComponent("network/ready.json")
             let deadline = ContinuousClock.now + .seconds(25)
             while !FileManager.default.fileExists(atPath: ready.path) {
@@ -462,10 +483,21 @@ enum NativeCaptureHost {
         do {
             try await index.exportTimeline(to: timeline)
             try CaptureSaveCoordinator.writeProgress(directory, stage: "package", cancelAllowed: true)
-            let package = try await CaptureEvidenceExporter().export(sessionDirectory: directory, manifestJSON: state.encodedJSON, normalizedTimeline: timeline) { stage in
+            let outcome = try await CaptureEvidenceExporter().exportOutcome(sessionDirectory: directory, manifestJSON: state.encodedJSON, normalizedTimeline: timeline) { stage in
                 try CaptureSaveCoordinator.writeProgress(directory, stage: stage.rawValue, cancelAllowed: stage != .publish)
             }
-            state["package_path"] = .string(package.path)
+            state["package_path"] = .string(outcome.archive.path)
+            if let assessment = outcome.taskAssessmentJSON {
+                state["task_assessment"] = try JSONDecoder().decode(CaptureStateValue.self, from: assessment)
+                var completeness = state["completeness"]?.object ?? [:]
+                completeness["missing_required_sources"] = .strings(outcome.missingRequiredSources)
+                if !outcome.missingRequiredSources.isEmpty {
+                    completeness["partial"] = .bool(true)
+                    state["phase"] = .string("partial")
+                    state.warn("Required task evidence is missing: " + outcome.missingRequiredSources.joined(separator: ", "))
+                }
+                state["completeness"] = .object(completeness)
+            }
         } catch {
             if error is CancellationError || Task.isCancelled { throw CancellationError() }
             state.warn("Package export failed: \(error.localizedDescription)")

@@ -140,10 +140,11 @@ struct CaptureSession: Decodable, Sendable {
     let context: CaptureJSON?
     let completeness: CaptureJSON?
     let saveProgress: CaptureJSON?
+    let taskAssessment: CaptureJSON?
 
     enum CodingKeys: String, CodingKey {
         case id, directory, platform, deviceId, deviceName, startedAt, phase, sources, warnings
-        case packagePath, counts, routingRestored, caCertificatePath, context, completeness, saveProgress
+        case packagePath, counts, routingRestored, caCertificatePath, context, completeness, saveProgress, taskAssessment
     }
 
     init(from decoder: any Decoder) throws {
@@ -164,6 +165,7 @@ struct CaptureSession: Decodable, Sendable {
         context = try values.decodeIfPresent(CaptureJSON.self, forKey: .context)
         completeness = try values.decodeIfPresent(CaptureJSON.self, forKey: .completeness)
         saveProgress = try values.decodeIfPresent(CaptureJSON.self, forKey: .saveProgress)
+        taskAssessment = try values.decodeIfPresent(CaptureJSON.self, forKey: .taskAssessment)
     }
 
     private init(copying session: Self, counts: [String: Int], sources: [String: String], warnings: [String]) {
@@ -172,6 +174,7 @@ struct CaptureSession: Decodable, Sendable {
         phase = session.phase; packagePath = session.packagePath; routingRestored = session.routingRestored
         caCertificatePath = session.caCertificatePath
         context = session.context; completeness = session.completeness; saveProgress = session.saveProgress
+        taskAssessment = session.taskAssessment
         self.counts = counts; self.sources = sources; self.warnings = warnings
     }
 

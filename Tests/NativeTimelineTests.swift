@@ -6,6 +6,31 @@ import Testing
 /// Local synthetic evidence only; Python is an independent compatibility oracle, never a live collector.
 @Suite
 struct NativeTimelineTests {
+    @Test static func setupProofRequiresMatchingHTTPSResponseBody() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        try fixture.state(phase: "recording")
+        let nonce = String(repeating: "a", count: 32)
+        let body = String(data: try JSONSerialization.data(withJSONObject: ["nonce": nonce, "capture_check": "browser_https"]), encoding: .utf8)!
+        func event(_ scheme: String, body text: String, probe: Bool = true) -> [String: Any] {
+            ["timestamp": "2026-10-15T03:45:00Z", "kind": "response", "detail": [
+                "url": "\(scheme)://mitm.it/mobile-capture-check/\(nonce)/https", "status": 200,
+                "setup_probe": probe, "setup_probe_nonce": nonce,
+                "response_body": ["encoding": "utf-8", "text": text, "bytes": text.utf8.count]]]
+        }
+        try fixture.writeJSONLines("network/events.jsonl", [event("http", body: body), event("https", body: "{}"), event("https", body: body, probe: false)])
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        _ = try await store.refresh()
+        #expect(try await store.setupProbeEvent(nonce: nonce) == nil)
+        try fixture.append("network/events.jsonl", Fixture.line(event("https", body: body)))
+        _ = try await store.refresh()
+        let proof = try #require(try await store.setupProbeEvent(nonce: nonce))
+        #expect(proof.kind == "response")
+        #expect(proof.rawRef == "network/events.jsonl#L4")
+        #expect(try await store.setupProbeEvent(nonce: String(repeating: "b", count: 32)) == nil)
+        #expect(try await store.setupProbeEvent(nonce: "../invalid") == nil)
+    }
+
     @Test static func physicalIPhoneLogFormat() throws {
         let line = "Oct 15 03:45:00.123456 Ad Proof(AdSDK)[431] <Debug>: café request 😀\r\n"
         let parsed = try #require(IPhoneLogFormat.parse(Data(line.utf8), sessionStartedAt: "2026-10-15T03:00:00.000000Z"))

@@ -3,6 +3,7 @@ import base64
 import datetime as dt
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -17,6 +18,43 @@ class CaptureAddon:
         self.entries = {}
         self.pending = {}
         self.missing_bodies = []
+        nonce = os.environ.get("CAPTURE_SETUP_NONCE", "")
+        self.setup_nonce = nonce if re.fullmatch(r"[0-9a-f]{32}", nonce) else None
+
+    def setup_response(self, flow):
+        """A nonce-bound browser TLS check, served by this existing proxy only."""
+        if not self.setup_nonce or flow.request.host.lower() != "mitm.it":
+            return
+        prefix = "/mobile-capture-check/" + self.setup_nonce
+        path = flow.request.path
+        if path not in (prefix, prefix + "/https") or flow.request.method != "GET":
+            return
+        from mitmproxy import http
+        headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+                   "X-Content-Type-Options": "nosniff"}
+        if path.endswith("/https"):
+            if flow.request.scheme != "https":
+                flow.response = http.Response.make(400, b"Use HTTPS for this check", headers)
+                return
+            payload = {"nonce": self.setup_nonce, "capture_check": "browser_https",
+                       "message": "Synthetic capture check: caf\u00e9 \u65e5\u672c\u8a9e"}
+            headers["Content-Type"] = "application/json; charset=utf-8"
+            headers["Access-Control-Allow-Origin"] = "http://mitm.it"
+            flow.response = http.Response.make(200, json.dumps(payload, ensure_ascii=False).encode(), headers)
+        else:
+            headers["Content-Type"] = "text/html; charset=utf-8"
+            headers["Content-Security-Policy"] = "default-src 'none'; connect-src https://mitm.it; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
+            target = "https://mitm.it" + prefix + "/https"
+            page = """<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mobile Capture Check</title><style>body{font:17px system-ui;max-width:40em;margin:3em auto;padding:1.5em;color-scheme:light dark}button{font:inherit;padding:1em;border-radius:.7em}p{line-height:1.5}</style>
+<h1>Check HTTPS Capture</h1><p>Keep Mobile Capture checking on your Mac. This button sends synthetic text through its capture connection. It does not send app data to an external test service.</p>
+<button id="check">Verify HTTPS</button><p id="status" role="status"></p>
+<p>This verifies this browser's connection and certificate trust. Your Mac checks app logs separately. It does not verify every app or SDK, or your internet connection.</p>
+<script>const b=document.getElementById('check'),s=document.getElementById('status');b.onclick=async()=>{b.disabled=true;s.textContent='Checking HTTPS…';try{const r=await fetch(TARGET,{cache:'no-store',credentials:'omit'});if(!r.ok)throw Error('The check returned '+r.status);const p=await r.json();if(p.nonce!==NONCE)throw Error('Use the current check link on your Mac');s.textContent='HTTPS captured. Return to Mobile Capture on your Mac.';}catch(e){s.textContent='HTTPS could not be verified. Check the capture certificate is installed and fully trusted, then try again. Your Mac has more details.';}finally{b.disabled=false;}};</script></html>"""
+            page = page.replace("TARGET", json.dumps(target)).replace("NONCE", json.dumps(self.setup_nonce))
+            flow.response = http.Response.make(200, page.encode(), headers)
+        flow.metadata["mobile_capture_setup_nonce"] = self.setup_nonce
 
     def running(self):
         self.root.mkdir(parents=True, exist_ok=True)
@@ -31,6 +69,10 @@ class CaptureAddon:
             payload["client_address"] = getattr(getattr(flow, "client_conn", None), "peername", None)
         if request:
             payload.update(method=request.method, url=request.pretty_url)
+        if flow is not None and getattr(flow, "metadata", {}).get("mobile_capture_setup_nonce"):
+            payload.update(setup_probe=True, setup_probe_nonce=flow.metadata["mobile_capture_setup_nonce"])
+            transport = os.environ.get("CAPTURE_SETUP_TRANSPORT", "unknown")
+            payload["setup_probe_transport"] = transport if transport in ("iphone_wireguard", "android_reverse", "simulator_proxy") else "unknown"
         payload.update(detail or {})
         event = {"id": f"network:{flow_id or time.time_ns()}:{kind}", "timestamp": iso(timestamp),
                  "original_timestamp": str(timestamp) if timestamp is not None else None,
@@ -108,6 +150,7 @@ class CaptureAddon:
                                                               "missing_bodies": self.missing_bodies}))
 
     def request(self, flow):
+        self.setup_response(flow)
         if flow.request.raw_content is None:
             self.missing_bodies.append({"flow_id": flow.id, "source": "request"})
         self.pending[flow.id] = flow

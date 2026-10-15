@@ -71,6 +71,7 @@ struct NativeCaptureRequest: Codable, Sendable {
     var iphone_tunnel_directory: String?
     var logging_policy: CaptureLoggingPolicy?
     var log_scope: CaptureLogScope?
+    var setup_context: CaptureSessionSetupContext?
 }
 
 struct CaptureHostEnvelope: Codable, Sendable {

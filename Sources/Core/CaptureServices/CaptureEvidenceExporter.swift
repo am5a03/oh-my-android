@@ -4,6 +4,12 @@ nonisolated enum CaptureEvidenceExportStage: String, Sendable {
     case validateEvidence = "validate_evidence", package, publish
 }
 
+nonisolated struct CaptureEvidenceExportOutcome: Sendable {
+    let archive: URL
+    let taskAssessmentJSON: Data?
+    let missingRequiredSources: [String]
+}
+
 /// Publishes the existing portable schema without loading raw captures into memory.
 /// Collectors must be stopped, routing restored/reported, and the timeline refreshed first.
 nonisolated struct CaptureEvidenceExporter: Sendable {
@@ -14,6 +20,13 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
     @concurrent
     func export(sessionDirectory: URL, manifestJSON: Data, normalizedTimeline: URL,
                 progress: (@Sendable (CaptureEvidenceExportStage) throws -> Void)? = nil) async throws -> URL {
+        try await exportOutcome(sessionDirectory: sessionDirectory, manifestJSON: manifestJSON,
+            normalizedTimeline: normalizedTimeline, progress: progress).archive
+    }
+
+    @concurrent
+    func exportOutcome(sessionDirectory: URL, manifestJSON: Data, normalizedTimeline: URL,
+                progress: (@Sendable (CaptureEvidenceExportStage) throws -> Void)? = nil) async throws -> CaptureEvidenceExportOutcome {
         guard let supplied = try JSONSerialization.jsonObject(with: manifestJSON) as? [String: Any] else {
             throw AppError("The capture manifest must be a JSON object.")
         }
@@ -33,7 +46,15 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
         }
         try progress?(.validateEvidence)
         let references = try CaptureEvidenceReferences(stage: stage, scratch: work)
-        let summary = try TimelineSummary.read(stage.appendingPathComponent(timelinePath), references: references)
+        let contextInput = supplied["context"] as? [String: Any] ?? [:]
+        let setup: CaptureSessionSetupContext?
+        if let value = contextInput["capture_setup"] {
+            setup = try JSONDecoder().decode(CaptureSessionSetupContext.self, from: JSONSerialization.data(withJSONObject: value)).validated()
+        } else { setup = nil }
+        let scope = contextInput["log_scope"] as? [String: Any] ?? [:]
+        let scopeVerified = scope["mode"] as? String == "app" && scope["application_id"] as? String == setup?.plan?.applicationID
+        let summary = try TimelineSummary.read(stage.appendingPathComponent(timelinePath), references: references,
+                                              plan: setup?.plan, appScopeVerified: scopeVerified)
         let manifest = try Self.packageManifest(supplied, artifacts: artifacts, summary: summary, stage: stage)
         var context: [String: Any] = [:]
         for key in ["id", "platform", "device_id", "device_name", "started_at", "stopped_at", "ended_at", "target_app", "app", "build", "tool_versions", "context", "correlation"] {
@@ -42,7 +63,8 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
         try Self.writeJSON(manifest, to: stage.appendingPathComponent("manifest.json"))
         try Self.writeJSON(context, to: stage.appendingPathComponent("context.json"))
         try Self.write(Data(Self.readme.utf8), to: stage.appendingPathComponent("README.txt"))
-        let names = (artifacts.map(\.path) + [timelinePath, "manifest.json", "context.json", "README.txt"]).sorted()
+        try Self.write(Data(Self.engineerSummary(manifest: manifest, setup: setup).utf8), to: stage.appendingPathComponent("ENGINEER-SUMMARY.txt"))
+        let names = (artifacts.map(\.path) + [timelinePath, "manifest.json", "context.json", "README.txt", "ENGINEER-SUMMARY.txt"]).sorted()
         var checksums = ""
         // These digests cover the exact bytes copied into our private stage.
         var copiedHashes = Dictionary(uniqueKeysWithValues: artifacts.map { ($0.path, $0.sha256) })
@@ -64,7 +86,10 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
         try await Self.archive(stage: stage, destination: archive, names: archiveNames)
         try progress?(.publish)
         try Task.checkCancellation()
-        return try root.publish(archive: archive)
+        let taskAssessment = try manifest["task_assessment"].map { try JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys]) }
+        let completeness = manifest["completeness"] as? [String: Any] ?? [:]
+        return CaptureEvidenceExportOutcome(archive: try root.publish(archive: archive), taskAssessmentJSON: taskAssessment,
+            missingRequiredSources: completeness["missing_required_sources"] as? [String] ?? [])
     }
 
     private static func packageManifest(_ supplied: [String: Any], artifacts: [CaptureEvidenceArtifact], summary: TimelineSummary, stage: URL) throws -> [String: Any] {
@@ -136,14 +161,62 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
         completeness["network_error_refs"] = summary.networkErrorRefs
         completeness["unparsed_event_refs"] = summary.unparsedRefs
         completeness["unknown_clock_events"] = summary.unknownClockEvents
+        if let plan = summary.plan, let evidence = summary.taskEvidence {
+            let assessment = CapturePlanAssessment.evaluate(plan: plan, evidence: evidence,
+                captureLogs: supplied["capture_logs"] as? Bool ?? originalSources["logs"].map { $0 != "not_selected" } ?? false,
+                captureNetwork: supplied["capture_network"] as? Bool ?? originalSources["network"].map { $0 != "not_selected" } ?? false)
+            let encoder = JSONEncoder()
+            encoder.keyEncodingStrategy = .convertToSnakeCase
+            result["task_assessment"] = try JSONSerialization.jsonObject(with: encoder.encode(assessment))
+            completeness["missing_required_sources"] = assessment.missingRequiredSources
+            if !assessment.requirementsMet {
+                partial = true
+                completeness["partial"] = true
+                warnings.append(assessment.summary)
+            }
+        }
         result["sources"] = sources
         result["warnings"] = warnings
         result["completeness"] = completeness
         result["package_state"] = partial ? "partial" : "complete"
-        result["network_diagnostics"] = ["decoded_http_events": summary.decodedHTTPEvents, "tls_errors": summary.tlsErrors,
+        result["network_diagnostics"] = ["decoded_http_events": summary.decodedHTTPEvents, "decoded_https_responses": summary.decodedHTTPSResponses,
+            "setup_https_responses": summary.setupHTTPSResponses, "tls_errors": summary.tlsErrors,
             "certificate_rejections": summary.certificateRejections, "request_errors": summary.requestErrors]
         result["artifacts"] = artifacts.sorted { $0.path < $1.path }.map { ["path": $0.path, "bytes": $0.bytes, "sha256": $0.sha256] as [String: Any] }
         return result
+    }
+
+    private static func engineerSummary(manifest: [String: Any], setup: CaptureSessionSetupContext?) -> String {
+        var lines = ["Mobile Capture engineer handoff", "", "Session: \(manifest["id"] ?? "Unknown")",
+                     "Platform: \(manifest["platform"] ?? "Unknown")", "Device: \(manifest["device_name"] ?? "Unknown")",
+                     "Selected app: \(manifest["target_app"] ?? "Not specified")", "Started: \(manifest["started_at"] ?? "Unknown")",
+                     "Package coverage: \(manifest["package_state"] ?? "Unknown")", ""]
+        if let setup {
+            lines += ["Purpose: \(setup.purpose == .check ? "Setup check" : "Issue recording")"]
+            if let plan = setup.plan {
+                lines += ["Task: \(plan.title)", "Task identity: \(plan.id), version \(plan.version)"]
+                if let ticket = plan.ticket { lines.append("Ticket: " + ticket) }
+                lines += ["", "Reproduction steps:"] + plan.reproductionSteps.enumerated().map { "\($0.offset + 1). \($0.element)" }
+            }
+            if !setup.checks.isEmpty {
+                lines += ["", "Preparation checks (reported before recording; not current evidence coverage):"]
+                lines += setup.checks.map { "- \($0.id): \($0.state), \($0.code), checked \($0.checkedAt)" }
+            }
+        }
+        if let sources = manifest["sources"] as? [String: String] {
+            lines += ["", "Captured sources:"] + sources.keys.sorted().map { "- \($0): \(sources[$0] ?? "unknown")" }
+        }
+        if let assessment = manifest["task_assessment"] as? [String: Any], let missing = assessment["missing_required_sources"] as? [String] {
+            let hasRequired = setup?.plan.map { $0.sources.logs == .required || $0.sources.network == .required } ?? false
+            lines += ["", !hasRequired ? "This task has no required sources. Review observed coverage and hints in manifest.json." : missing.isEmpty ? "Required source evidence was observed. Review expected hints and scope in manifest.json." : "Missing required evidence: " + missing.joined(separator: ", ")]
+        }
+        if let warnings = manifest["warnings"] as? [String], !warnings.isEmpty {
+            lines += ["", "Coverage and diagnostic notes:"] + warnings.map { "- " + $0 }
+        }
+        lines += ["", "Open manifest.json for limits, gaps and clock calibration. timeline/events.jsonl combines device logs, network, markers and companion status.",
+                  "Setup probes verify the browser's capture path only. Network traffic can include other apps. Time proximity does not establish request identity.",
+                  "Review private evidence before sharing. This package was saved locally; no automatic upload is performed.", ""]
+        return lines.joined(separator: "\n")
     }
 
     private static func flowIdentifier(_ value: Any) -> String {
@@ -247,6 +320,11 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
 private nonisolated struct TimelineSummary {
     var counts: [String: Int] = [:]
     var decodedHTTPEvents = 0
+    var decodedHTTPSResponses = 0
+    var setupHTTPSResponses = 0
+    var plan: CapturePlan?
+    var taskEvidence: CapturePlanEvidence?
+    var appScopeVerified = false
     var observedLogEvents = 0
     var tlsErrors = 0
     var certificateRejections = 0
@@ -256,8 +334,11 @@ private nonisolated struct TimelineSummary {
     var unparsedRefs: [String] = []
     var unknownClockEvents = 0
 
-    static func read(_ url: URL, references: CaptureEvidenceReferences) throws -> Self {
+    static func read(_ url: URL, references: CaptureEvidenceReferences, plan: CapturePlan? = nil, appScopeVerified: Bool = false) throws -> Self {
         var result = Self()
+        result.plan = plan
+        result.taskEvidence = plan.map(CapturePlanEvidence.init)
+        result.appScopeVerified = appScopeVerified
         let input = try FileHandle(forReadingFrom: url)
         defer { try? input.close() }
         var buffer = Data()
@@ -288,11 +369,25 @@ private nonisolated struct TimelineSummary {
         }
         try references.validate(id: id, source: source, path: String(rawRef[..<separator.lowerBound]), line: lineNumber)
         counts[source == "marker" && kind == "capture_status" ? "status" : source, default: 0] += 1
-        if source == "logs", kind != "collector_status" { observedLogEvents += 1 }
+        if source == "logs", kind != "collector_status" {
+            observedLogEvents += 1
+            if kind == "log" {
+                taskEvidence?.observeAppLog(message: event["summary"] as? String ?? "", applicationID: plan?.applicationID, scopeVerified: appScopeVerified)
+            }
+        }
         if event["clock_uncertainty_ms"] == nil || event["clock_uncertainty_ms"] is NSNull { unknownClockEvents += 1 }
         if ["unparsed_log", "parse_error"].contains(kind) { unparsedRefs.append(rawRef) }
         guard source == "network" else { return }
         if ["request", "response"].contains(kind) { decodedHTTPEvents += 1 }
+        if kind == "response", let url = detail["url"] as? String {
+            let isProbe = CaptureBodyEvidence.isSetupProbe(detail)
+            if URLComponents(string: url)?.scheme?.lowercased() == "https" {
+                decodedHTTPSResponses += 1
+                if isProbe { setupHTTPSResponses += 1 }
+            }
+            taskEvidence?.observeHTTP(url: url, statusCode: detail["status"] as? Int,
+                requestBodyAvailable: CaptureBodyEvidence.isAvailable(detail["request_body"]), responseBodyAvailable: CaptureBodyEvidence.isAvailable(detail["response_body"]), isSetupProbe: isProbe)
+        }
         if let flow = detail["flow_id"], !(flow is NSNull) {
             let identifier = String(describing: flow)
             if kind == "request" { pending.insert(identifier) }

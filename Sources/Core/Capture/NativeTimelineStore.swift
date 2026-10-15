@@ -113,7 +113,7 @@ actor NativeTimelineStore {
     private func prepare(state: [String: Any], verify: Bool) throws -> Bool {
         let metadata: [String: Any] = ["started_at": state["started_at"] ?? NSNull(),
             "clock_calibration": state["clock_calibration"] ?? NSNull(), "platform": state["platform"] ?? NSNull(),
-            "log_partial_tail_bytes": Self.partialTailBytes(state), "normalizer_version": 3]
+            "log_partial_tail_bytes": Self.partialTailBytes(state), "normalizer_version": 4]
         let encoded = try NativeTimelineNormalizer.jsonData(metadata)
         let fingerprint = Self.digest(encoded)
         try database.execute("BEGIN IMMEDIATE")
@@ -258,8 +258,25 @@ actor NativeTimelineStore {
             let key = source == "marker" ? (kind == "capture_status" ? "status" : "markers") : source
             counters[key, default: 0] += 1
             if source == "logs", kind != "collector_status" { counters["observed_logs", default: 0] += 1 }
+            if source == "logs", kind == "log" { counters["parsed_logs", default: 0] += 1 }
             if source == "network" {
                 if ["request", "response"].contains(kind) { counters["decoded_http_events", default: 0] += 1 }
+                if !CaptureBodyEvidence.isSetupProbe(detail), CaptureBodyEvidence.isCompleteHTTPSResponse(kind: kind, detail: detail) {
+                    counters["complete_task_https_exchanges", default: 0] += 1
+                }
+                if kind == "response", let url = detail["url"] as? String,
+                   URLComponents(string: url)?.scheme?.lowercased() == "https" {
+                    counters["decoded_https_responses", default: 0] += 1
+                    if detail["setup_probe"] as? Bool == true,
+                       let nonce = detail["setup_probe_nonce"] as? String,
+                       nonce.utf8.count == 32,
+                       nonce.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                       URLComponents(string: url)?.host?.lowercased() == "mitm.it",
+                       URLComponents(string: url)?.path == "/mobile-capture-check/\(nonce)/https",
+                       detail["status"] as? Int == 200 {
+                        counters["setup_https_responses", default: 0] += 1
+                    }
+                }
                 if kind == "tls_error" {
                     counters["tls_errors", default: 0] += 1
                     let error = (detail["error"] as? String ?? "").lowercased()
@@ -391,6 +408,31 @@ actor NativeTimelineStore {
                 await Task.yield()
             }
         }
+    }
+
+    /// Looks only in this session's evidence. Callers still bind its session/time/configuration
+    /// to the current setup check; finding this does not establish selected-app attribution.
+    func setupProbeEvent(nonce: String) async throws -> CaptureEvent? {
+        guard nonce.utf8.count == 32, nonce.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { return nil }
+        let page = try await query(.init(source: "network", search: "/mobile-capture-check/" + nonce + "/https", limit: 50))
+        for row in page.rows.reversed() where row.kind == "response" {
+            guard let event = try event(id: row.id), event.source == "network",
+                  event.detail.value(for: "setup_probe")?.boolValue == true,
+                  event.detail.value(for: "setup_probe_nonce")?.stringValue == nonce,
+                  event.detail.value(for: "status")?.numberValue == 200,
+                  let textURL = event.detail.value(for: "url")?.stringValue,
+                  let url = URLComponents(string: textURL), url.scheme == "https", url.host == "mitm.it",
+                  url.path == "/mobile-capture-check/\(nonce)/https",
+                  let body = event.detail.value(for: "response_body"),
+                  body.value(for: "unavailable")?.boolValue != true,
+                  body.value(for: "encoding")?.stringValue == "utf-8",
+                  let text = body.value(for: "text")?.stringValue,
+                  body.value(for: "bytes")?.numberValue == Double(text.utf8.count),
+                  let payload = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: String],
+                  payload["nonce"] == nonce, payload["capture_check"] == "browser_https" else { continue }
+            return event
+        }
+        return nil
     }
 
     func event(id: String) throws -> CaptureEvent? {
@@ -569,8 +611,8 @@ actor NativeTimelineStore {
         if values["status", default: 0] > 0 { counts["status"] = values["status"] }
         return .init(counts: counts, totalCount: counts.values.reduce(0, +),
             latestSequence: latest, generation: current,
-            networkDiagnostics: Dictionary(uniqueKeysWithValues: ["decoded_http_events", "tls_errors", "certificate_rejections", "request_errors"].map { ($0, values[$0, default: 0]) }),
-            observedLogEvents: values["observed_logs", default: 0], pendingBytes: pendingBytes)
+            networkDiagnostics: Dictionary(uniqueKeysWithValues: ["decoded_http_events", "decoded_https_responses", "setup_https_responses", "complete_task_https_exchanges", "tls_errors", "certificate_rejections", "request_errors"].map { ($0, values[$0, default: 0]) }),
+            observedLogEvents: values["observed_logs", default: 0], parsedLogEvents: values["parsed_logs", default: 0], pendingBytes: pendingBytes)
     }
     private func filter(_ query: NativeTimelineQuery, generation: Int64) -> (String, [NativeTimelineSQLValue]) {
         var conditions = ["generation=?"], values: [NativeTimelineSQLValue] = [.integer(generation)]
