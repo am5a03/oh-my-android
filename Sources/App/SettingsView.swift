@@ -61,6 +61,7 @@ private struct GeneralSettingsView: View {
                     }
                 }
             }
+            CaptureCompanionSettingsSection()
             UpdateSettingsSection()
             if let error {
                 Text(error).font(.caption).foregroundStyle(.red)

@@ -45,7 +45,10 @@ final class MobileCaptureAppDelegate: NSObject, NSApplicationDelegate {
                 do {
                     let request = try CaptureHandoff(url: url)
                     switch request.action {
-                    case .open(nil): break
+                    case .open(nil):
+                        if !capture.store.didDiscover, !capture.store.hasActiveCapture {
+                            await capture.store.refreshDevices()
+                        }
                     case .open(let context?):
                         await capture.store.applyExternalSelection(platform: context.platform.rawValue,
                             deviceID: context.deviceID, applicationID: context.applicationID)

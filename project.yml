@@ -34,23 +34,25 @@ targets:
     platform: macOS
     sources:
       - path: Sources
-        excludes: ["MCP/**", "MobileCaptureApp/**", "CaptureHost/**", "CaptureProxy/**", "Core/CaptureLifecycle/**", "Core/CaptureServices/CaptureEvidence*.swift"]
-      - path: CaptureRuntime
-        type: folder
-        buildPhase: resources
+        excludes:
+          - MCP/**
+          - MobileCaptureApp/**
+          - CaptureHost/**
+          - CaptureProxy/**
+          - Core/CaptureLifecycle/**
+          - Core/CaptureServices/**
+          - Core/Capture/**
+          - Core/CaptureModels.swift
+          - State/CaptureStore.swift
+          - Windows/CaptureWindowController.swift
+          - UI/CaptureView.swift
+          - UI/CaptureCommands.swift
+          - UI/CaptureTimelineList.swift
+          - UI/CaptureLogSettingsView.swift
+          - UI/IPhoneCaptureSetupView.swift
     dependencies:
       # The MCP server ships inside the app: Contents/MacOS/ohmyandroid-mcp, signed with it.
       - target: ohmyandroid-mcp
-        embed: true
-        codeSign: true
-        copy:
-          destination: executables
-      - target: mobile-capture-host
-        embed: true
-        codeSign: true
-        copy:
-          destination: executables
-      - target: mobile-capture-proxy
         embed: true
         codeSign: true
         copy:
@@ -97,7 +99,7 @@ targets:
     platform: macOS
     sources:
       - path: Sources/Core
-        excludes: ["Imaging/**", "Capture/**", "CaptureServices/**", "CaptureLifecycle/**", "CaptureModels.swift"]
+        excludes: ["Imaging/**", "Capture/**", "CaptureServices/**", "CaptureLifecycle/**", "CaptureModels.swift", "CaptureHandoff/**"]
       - path: Sources/Features
       - path: Sources/MCP
     settings:
@@ -125,7 +127,7 @@ targets:
       base:
         PRODUCT_NAME: mobile-capture-host
         PRODUCT_MODULE_NAME: MobileCaptureHost
-        PRODUCT_BUNDLE_IDENTIFIER: se.royan.ohmyandroid.capture-host
+        PRODUCT_BUNDLE_IDENTIFIER: local.mobilecapture.development.host
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         SKIP_INSTALL: YES
@@ -139,7 +141,7 @@ targets:
       base:
         PRODUCT_NAME: mobile-capture-proxy
         PRODUCT_MODULE_NAME: MobileCaptureProxy
-        PRODUCT_BUNDLE_IDENTIFIER: se.royan.ohmyandroid.capture-proxy
+        PRODUCT_BUNDLE_IDENTIFIER: local.mobilecapture.development.proxy
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         SKIP_INSTALL: YES

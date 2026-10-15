@@ -14,9 +14,8 @@ struct OhMyAndroidApp: App {
             SettingsView().environment(delegate.model).environment(delegate.updates)
         }
         .commands {
-            CaptureCommands()
             CommandGroup(after: .newItem) {
-                Button("Capture Network & Logs…") { delegate.openCapture() }
+                Button(delegate.captureLauncher.menuTitle) { delegate.openCapture() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
             }
         }
@@ -40,7 +39,7 @@ private struct MenuBarContent: View {
             .disabled(delegate.model.context == nil)
         Button("Data Inspector…") { delegate.openDataInspector() }
             .disabled(delegate.model.context == nil)
-        Button("Capture Network & Logs…") { delegate.openCapture() }
+        Button(delegate.captureLauncher.menuTitle) { delegate.openCapture() }
         Divider()
         Button("Restart adb") { Task { await delegate.model.devices?.restartServer() } }
             .disabled(delegate.model.devices == nil)

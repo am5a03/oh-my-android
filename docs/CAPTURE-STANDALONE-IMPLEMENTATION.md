@@ -47,3 +47,31 @@ sessions under incoming context. GUI launching, app reopening, OS authorization
 and connected-device checks remain deferred; compilation alone does not prove
 those interactions. A dedicated final app icon and owner-controlled release
 identity remain release work.
+
+## Checkpoint 3: optional Oh My Android launcher
+
+- Oh My Android now opens the separately installed companion through explicit
+  NSWorkspace application targeting. It passes a typed selected Android/Simulator
+  context, keeps `--capture` as a forwarding entry point, and offers setup/app
+  selection when the companion is absent. App selection can also be changed in
+  Settings, and bookmarks retain a chosen copy across rename/move.
+- Discovery checks the provisional local development ID. An explicitly chosen
+  companion can use a different owner-controlled ID when its product metadata is
+  compatible. The permanent release ID is still not configured for automatic
+  discovery; publishing must address this deliberately.
+- A stale/missing selected copy never silently falls back to another installed
+  copy. Unsupported handoff versions open the explicitly selected app without
+  context and explain the missing preselection. Metadata is compatibility data,
+  not authentication for future control operations.
+- Removed capture UI/lifecycle/services/resources and capture-only helper
+  embedding from Oh My Android. Its Android tools, inspectors, screenshot/video
+  features, updater configuration and Android MCP remain independent.
+
+Validation: both app products build with Swift 6 warnings as errors. Bundle
+inspection shows only `ohmyandroid-mcp` in Oh My Android, and only the host/proxy
+plus CaptureRuntime in Mobile Capture. A fake-opener suite covers missing apps,
+explicit selection precedence, encoded context, chosen-copy relocation, missing
+selected copies, incompatible versions, unrelated/escaped bundles and launch
+failures. It launches no application. Actual Launch Services warm/cold behavior,
+menu/window interaction and independent app quitting still need visual testing.
+Capture distribution scripts are updated in the following checkpoint.
