@@ -54,6 +54,10 @@ actor NativeTimelineStore {
         return try NativeTimelineNormalizer.jsonData(state)
     }
 
+    /// Read the committed cache without advancing ingress or verifying original files.
+    /// Paused indexing can still inspect existing rows and retain its backlog indicator.
+    func currentSnapshot() throws -> NativeTimelineSnapshot { try snapshot() }
+
     /// Complete work still commits bounded batches and yields between them. Cancellation
     /// leaves the last complete checkpoint usable and resumes from it on a later call.
     func refresh(collectorsStopped: Bool = false, mode: NativeTimelineRefreshMode = .complete) async throws -> NativeTimelineSnapshot {
@@ -86,7 +90,7 @@ actor NativeTimelineStore {
             let phase = state["phase"] as? String ?? ""
             let stopped = collectorsStopped || phase == "stopping" && tailFinalized
             let active = ["preparing", "recording", "stopping"].contains(phase) && !stopped
-            let advanced = try ingestBatch(sources: NativeTimelineNormalizer.sources, state: state, active: active, stopped: stopped)
+            let advanced = try ingestBatch(sources: NativeTimelineNormalizer.sources, active: active, stopped: stopped)
             first = false
             pendingBytes = try pendingEvidenceBytes()
             let current = try snapshot()
@@ -159,10 +163,12 @@ actor NativeTimelineStore {
         } catch { try? database.execute("ROLLBACK"); throw error }
     }
 
-    private func ingestBatch(sources: [(String, String)], state: [String: Any], active: Bool, stopped: Bool) throws -> Bool {
+    private func ingestBatch(sources: [(String, String)], active: Bool, stopped: Bool) throws -> Bool {
         try database.execute("BEGIN IMMEDIATE")
         do {
-            let current = try generation()
+            // Pin reconstruction metadata to this generation under the same write
+            // transaction; a different host/UI connection may have prepared a new one.
+            let current = try generation(), normalizationState = try storedState()
             var counters = try readCounters()
             var advanced = false
             for (source, path) in sources.sorted(by: { priority($0.0) < priority($1.0) }) {
@@ -202,7 +208,7 @@ actor NativeTimelineStore {
                             } else { raw = try file.read(offset: position.pendingStart, count: Int(length)) }
                             position.line += 1
                             try insert(source: source, path: path, line: position.line, offset: position.pendingStart, raw: raw,
-                                       state: state, generation: current, counters: &counters)
+                                       state: normalizationState, generation: current, counters: &counters)
                             admitted += 1
                             position.pendingStart = absolute + 1
                             position.previousCR = byte == 13
@@ -215,8 +221,8 @@ actor NativeTimelineStore {
                 if !active && position.offset == info.st_size && position.pendingStart < position.offset && !position.terminalTail {
                     try insert(source: source, path: path, line: position.line + 1, offset: position.pendingStart,
                                raw: file.read(offset: position.pendingStart, count: Int(position.offset - position.pendingStart)),
-                               state: state, generation: current, counters: &counters,
-                               incompleteTail: source == "logs" && Self.partialTailBytes(state) > 0)
+                               state: normalizationState, generation: current, counters: &counters,
+                               incompleteTail: source == "logs" && Self.partialTailBytes(normalizationState) > 0)
                     position.terminalTail = true
                     advanced = true
                 }
@@ -413,7 +419,7 @@ actor NativeTimelineStore {
         _ = try prepare(state: state, verify: false)
         while true {
             try Task.checkCancellation()
-            let advanced = try ingestBatch(sources: [("marker", Self.path("marker"))], state: state, active: true, stopped: false)
+            let advanced = try ingestBatch(sources: [("marker", Self.path("marker"))], active: true, stopped: false)
             if let id = savedMarkerIDs[sourceID], let result = try event(id: id) { return result }
             guard advanced else { throw NativeTimelineError.message("The saved marker could not be read back.") }
             await Task.yield()

@@ -427,6 +427,8 @@ struct NativeTimelineTests {
         await #expect(throws: CancellationError.self) { try await operation.value }
         let checkpoint = try await store.query(NativeTimelineQuery())
         #expect(checkpoint.matchingCount >= 2_048 && checkpoint.matchingCount < 20_000)
+        let paused = try await store.currentSnapshot()
+        #expect(paused.totalCount == checkpoint.matchingCount && paused.pendingBytes > 0)
         try fixture.writeJSONLines("timeline/markers.jsonl", (0..<1_100).map {
             ["timestamp": "2026-10-15T03:45:02Z", "kind": "marker", "summary": "Older marker \($0)"]
         })

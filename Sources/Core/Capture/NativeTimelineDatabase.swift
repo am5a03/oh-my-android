@@ -33,6 +33,7 @@ final class NativeTimelineDatabase {
             try execute("CREATE TABLE IF NOT EXISTS events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,generation INTEGER NOT NULL,id TEXT NOT NULL,timestamp TEXT NOT NULL,source TEXT NOT NULL,rank INTEGER NOT NULL,line INTEGER NOT NULL,kind TEXT NOT NULL,summary TEXT NOT NULL,raw_offset INTEGER NOT NULL,raw_length INTEGER NOT NULL,UNIQUE(generation,id))")
             try execute("CREATE INDEX IF NOT EXISTS chronological ON events(generation,timestamp,rank,line,id)")
             try execute("CREATE INDEX IF NOT EXISTS source_chronological ON events(generation,source,timestamp,rank,line,id)")
+            try execute("CREATE INDEX IF NOT EXISTS ingress ON events(generation,sequence)")
             try execute("CREATE TABLE IF NOT EXISTS search_matches(query TEXT NOT NULL,generation INTEGER NOT NULL,sequence INTEGER NOT NULL,PRIMARY KEY(query,generation,sequence)) WITHOUT ROWID")
             try execute("CREATE TABLE IF NOT EXISTS search_progress(query TEXT PRIMARY KEY,generation INTEGER NOT NULL,sequence INTEGER NOT NULL,accessed INTEGER NOT NULL)")
             let generation = String(Int64((Date().timeIntervalSince1970 * 1_000_000).rounded()))
