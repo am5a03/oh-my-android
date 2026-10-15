@@ -79,7 +79,7 @@ nonisolated struct CaptureLogDiscovery: Sendable {
             let help = try await checked(adb, ["-s", device.id, "shell", "logcat", "--help"])
             var arguments = ["-s", device.id, "logcat", "-b", "main", "-b", "system", "-b", "crash", "-v", "epoch", "-T", "1", "*:V"]
             var strategy = CaptureLogFilterConfiguration.Strategy.androidProcessMap
-            if help.stdout.contains("--uid") {
+            if (help.stdout + help.stderr).contains("--uid") {
                 let probe = try await runner.run(URL(fileURLWithPath: adb), arguments: ["-s", device.id, "logcat", "--uid=\(uid)", "-d", "-t", "1", "-v", "epoch"])
                 if probe.isSuccess { arguments.insert("--uid=\(uid)", at: 3); strategy = .androidUID }
             }

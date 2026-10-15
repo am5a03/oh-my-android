@@ -121,6 +121,13 @@ struct CaptureLogDiscoveryTests {
         #expect(!denied.command.contains(where: { $0.hasPrefix("--uid") }))
     }
 
+    @Test func androidUIDCapabilityOnStderrStillUsesNativeUIDFiltering() async throws {
+        let result = try await CaptureLogDiscovery(runner: ScopeShell(uidHelpOnStderr: true)).resolve(device: Self.device("android"),
+            scope: .init(applicationID: "dev.capture.one"), tools: Self.tools)
+        #expect(result.filter?.strategy == .androidUID)
+        #expect(result.command.contains("--uid=1010123"))
+    }
+
     @Test func androidFallbackIsVerifiedAndFailsClosedWhenProcessLifetimesAreUnavailable() async throws {
         let result = try await CaptureLogDiscovery(runner: ScopeShell(uidSupported: false)).resolve(device: Self.device("android"),
             scope: .init(applicationID: "dev.capture.one"), tools: Self.tools)
@@ -239,6 +246,7 @@ private struct ScopeShell: ShellRunning {
     var simulatorBundlePath: String?
     var installerFails = false
     var uidPermissionDenied = false
+    var uidHelpOnStderr = false
     static let package = "codePath=/data/app/verified\nfirstInstallTime=2026-01-01 00:00:00\nlastUpdateTime=2026-01-01 00:00:00\n"
 
     func run(_ executable: URL, arguments: [String]) async throws -> ShellResult {
@@ -273,7 +281,10 @@ private struct ScopeShell: ShellRunning {
         else if tail == ["shell", "pm", "list", "packages", "--user", "10", "-U"] {
             output = "package:dev.capture.one uid:1010123\n" + (sharedUID ? "package:dev.capture.shared uid:1010123\n" : "")
         } else if tail == ["shell", "dumpsys", "package", "dev.capture.one"] { output = Self.package }
-        else if tail == ["shell", "logcat", "--help"] { output = uidSupported ? "--uid UID supported" : "basic logcat" }
+        else if tail == ["shell", "logcat", "--help"] {
+            output = uidSupported ? "--uid UID supported" : "basic logcat"
+            if uidHelpOnStderr { return .init(stdout: "", stderr: output, exitCode: 0) }
+        }
         else if tail.first == "logcat" {
             if uidPermissionDenied { return .init(stdout: "", stderr: "UID option permission denied", exitCode: 1) }
             output = ""
