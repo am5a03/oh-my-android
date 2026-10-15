@@ -76,7 +76,12 @@ struct IPhoneCaptureSetupTests {
         for (url, mode) in [(root, 0o755), (directory, 0o755), (result.serverConfiguration, 0o644), (result.clientProfile, 0o644)] {
             try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path)
         }
-        _ = try IPhoneCaptureSetup.readExisting(deviceID: "test-device", rootDirectory: root)
+        #expect(throws: IPhoneCaptureSetup.SetupError.self) { try IPhoneCaptureSetup.readExisting(deviceID: "test-device", rootDirectory: root) }
+        #expect(try permissions(root) == 0o755)
+        #expect(try permissions(directory) == 0o755)
+        #expect(try permissions(result.serverConfiguration) == 0o644)
+        #expect(try permissions(result.clientProfile) == 0o644)
+        _ = try IPhoneCaptureSetup.prepare(deviceID: "test-device", endpointHost: "192.168.1.20", rootDirectory: root)
         #expect(try permissions(root) == 0o700)
         #expect(try permissions(directory) == 0o700)
         #expect(try permissions(result.serverConfiguration) == 0o600)

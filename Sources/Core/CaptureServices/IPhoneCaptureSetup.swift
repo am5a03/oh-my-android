@@ -75,7 +75,7 @@ nonisolated enum IPhoneCaptureSetup {
         let directory = try deviceDirectory(deviceID: deviceID, rootDirectory: rootDirectory, create: false)
         let server = directory.appendingPathComponent("server.json")
         let profile = directory.appendingPathComponent("MobileCapture.conf")
-        guard let serverData = try readPrivateFile(server), let profileData = try readPrivateFile(profile),
+        guard let serverData = try readPrivateFile(server, repairPermissions: false), let profileData = try readPrivateFile(profile, repairPermissions: false),
               let text = String(data: profileData, encoding: .utf8) else { return nil }
         let keys = try decodeKeys(serverData)
         let prefix = "Endpoint = "
@@ -215,17 +215,27 @@ nonisolated enum IPhoneCaptureSetup {
         guard descriptor >= 0 else { throw SetupError.unsafeStorage }
         defer { close(descriptor) }
         var info = stat()
-        guard fstat(descriptor, &info) == 0, info.st_uid == geteuid(), fchmod(descriptor, 0o700) == 0 else { throw SetupError.unsafeStorage }
+        guard fstat(descriptor, &info) == 0, info.st_uid == geteuid() else { throw SetupError.unsafeStorage }
+        if create {
+            guard fchmod(descriptor, 0o700) == 0 else { throw SetupError.unsafeStorage }
+        } else {
+            guard info.st_mode & 0o077 == 0 else { throw SetupError.unsafeStorage }
+        }
     }
 
-    private static func readPrivateFile(_ url: URL) throws -> Data? {
+    private static func readPrivateFile(_ url: URL, repairPermissions: Bool = true) throws -> Data? {
         let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         if descriptor < 0, errno == ENOENT { return nil }
         guard descriptor >= 0 else { throw SetupError.unsafeStorage }
         defer { close(descriptor) }
         var info = stat()
         guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_uid == geteuid(),
-              info.st_size >= 0, info.st_size <= 65_536, fchmod(descriptor, 0o600) == 0 else { throw SetupError.unsafeStorage }
+              info.st_size >= 0, info.st_size <= 65_536 else { throw SetupError.unsafeStorage }
+        if repairPermissions {
+            guard fchmod(descriptor, 0o600) == 0 else { throw SetupError.unsafeStorage }
+        } else {
+            guard info.st_mode & 0o077 == 0 else { throw SetupError.unsafeStorage }
+        }
         var data = Data(), buffer = [UInt8](repeating: 0, count: 4_096)
         while true {
             let count = read(descriptor, &buffer, buffer.count)
