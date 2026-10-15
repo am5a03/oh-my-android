@@ -55,13 +55,16 @@ not provide capture over cellular.
 ## Source build prerequisites
 
 - macOS 26 and the existing application's build dependencies.
-- Android SDK platform-tools for Android, or full Xcode with a booted iOS Simulator.
+- Android SDK platform-tools for Android, or full Xcode for iPhone discovery and
+  Simulator capture. Physical iPhone logs also require libimobiledevice.
 - An installed `mitmdump` executable for network capture. Select an absolute path
   in the capture window's runtime settings when automatic discovery cannot find it.
 
 Source builds can use installed platform-tools and mitmproxy. Prepared Apple
 Silicon builds bundle both tools, including the network engine’s own Python
-interpreter; recipients do not install Python or Homebrew. Capture orchestration,
+interpreter; Android/network capture needs no separate Python or Homebrew install.
+Physical iPhone USB logging still requires the external libimobiledevice tools.
+Capture orchestration,
 discovery, indexing, markers, recovery and export use compiled Swift. The macOS
 proxy helper is compiled and embedded too. See
 [distribution instructions](CAPTURE-DISTRIBUTION.md) for the pinned cache,

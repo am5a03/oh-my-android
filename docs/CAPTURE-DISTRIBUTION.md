@@ -5,12 +5,19 @@ and evidence export use native Swift components. The remaining Python interprete
 is embedded inside the isolated mitmproxy network engine. Testers do not install
 Python, Homebrew, mitmproxy, Android Studio or the Android SDK for Android capture.
 iOS Simulator users still need Xcode and an installed Simulator runtime.
-Physical iPhone users need Xcode's device tools for discovery, and USB log
+Physical iPhone users need full Xcode's `devicectl` for discovery; the standalone
+Command Line Tools installation is insufficient. USB log
 capture additionally needs `libimobiledevice` installed once on the Mac
 (`brew install libimobiledevice`). That collector is not bundled in this
 checkpoint. Network capture uses the bundled engine plus WireGuard on the
 iPhone; its private profile and the public CA are configured through
 **Set Up iPhone Capture…**. See [the iPhone workflow](CAPTURE.md).
+
+The physical-iPhone implementation checkpoint adds device discovery, USB logs
+and WireGuard lifecycle support. It does not yet establish a completed live
+physical-iPhone capture/export proof or change the earlier Android/Simulator
+proof results. The prepared build still contains only the dependency payloads
+listed below; it does not silently install the extra USB collector.
 
 The reviewed dependency lock currently supports **Apple Silicon / arm64 only**:
 
@@ -164,13 +171,43 @@ DMG, following [Apple's direct-distribution workflow](https://developer.apple.co
 3. Connect the Android device by USB, enable USB debugging and approve the computer.
 4. During first setup, install the public capture CA generated on that tester's Mac. The engineer-prepared app must trust it for HTTPS bodies.
 5. Select the device and capture sources. Click **Start Capture**, reproduce the activity, then **Stop & Save**.
-6. Use **Export…** to save the single evidence ZIP.
+6. After **Capture Saved**, use **Export ZIP…** to save the single evidence ZIP,
+   or **Show in Finder** to reveal it.
 
 CA trust/device authorization remain one-time human setup. Private CA keys stay
 in the user's application-support directory and never enter the app bundle or
 export ZIP. For physical iPhone, follow **Set Up iPhone Capture…** after selecting
 the paired phone. Start on Mac before enabling its tunnel, and turn the phone
 tunnel off before confirming **Stop & Save**. Logs and network share the same ZIP.
+
+The iPhone's tunnel key pair is stable per device and stored outside session
+folders in private application support. Profile files are mode 600 inside
+mode-700 directories. A profile exported from the setup sheet also remains
+mode 600 and contains a private client key; it is for importing into that phone,
+not for sharing with an evidence package. Tunnel keys, profiles and CA private
+keys are excluded from the evidence ZIP. A Mac LAN-address change requires
+updating and reimporting the profile, without rotating the tunnel keys.
+
+The phone and Mac must be reachable over the same network on UDP 51820. The user
+starts on the Mac, enables WireGuard on the phone and, for first-time HTTPS,
+installs the public CA profile and enables its full SSL trust separately. Before
+stopping the server, the user turns the phone tunnel off and confirms **Tunnel
+Is Off**. The app records that human confirmation; it cannot control or verify
+the phone's VPN state. A USB log disconnect retains evidence and leaves the
+unconfirmed tunnel available. Logs-only sessions need no tunnel-off step.
+
+The shared timeline preserves raw iPhone timestamps, records that the year is
+inferred and the USB date is interpreted in UTC, and includes measured clock
+offset/uncertainty when available. Time proximity alone cannot establish app or
+ad-request ownership. Other phone apps may contribute logs and network traffic;
+the tunnel covers IPv4, while IPv6 and pinned/unsupported traffic can leave gaps.
+
+Live indexing uses bounded reads so a large device-log stream does not prevent
+network events and markers from being inspected. The visible/indexed counts may
+lag while raw evidence continues to accumulate. Stop performs a complete final
+drain and publishes one full timeline/ZIP; large sessions can take longer to save.
+The saved confirmation appears after publication rather than after the live
+display has merely caught up.
 
 ## Build a complete local artifact
 
@@ -224,11 +261,15 @@ pair the phone with the Mac, and use the WireGuard setup sheet. The v1 tunnel
 captures IPv4 over reachable Wi-Fi; IPv6 may bypass capture, and pinning can
 prevent HTTPS decoding. Phone tunnel toggles and certificate trust remain manual.
 
-The complete development packaging path was exercised for this checkpoint:
+The complete development packaging path was exercised for the earlier
+Android/Simulator checkpoint:
 optimized app/helper build, pinned cache verification, inside-out development
 signing, strict signature verification, sealed dependency hashes, clean-PATH
 version probes, MCP protocol checks and ZIP checksums/integrity all passed.
 A fresh Android capture using the packaged collectors also passed full-body,
 device-hash, timeline-reference and routing-restoration checks with no external
-tool/resource overrides. See [the proof report](CAPTURE-PROOF.md). Fresh-machine
-and actual Developer ID/notarization validation remain release checks.
+tool/resource overrides. See [the proof report](CAPTURE-PROOF.md). Those results
+do not establish physical-iPhone end-to-end capture or fresh-machine USB-tool
+installation. A fresh combined physical-iPhone logs/network/export proof,
+fresh-machine setup and actual Developer ID/notarization validation remain
+checks for this expanded release scope.
