@@ -88,6 +88,7 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
 
     private enum Action: Int {
         case openSession = 1, start, stop, export, showZIP, showCertificate
+        case pauseDisplay, followLatest, jumpToLatest, clearView, fullSession, wrapLines, older, newer
     }
 
     init(target: CaptureCommandTarget) {
@@ -103,6 +104,23 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         add("Export ZIP…", action: .export)
         add("Show ZIP in Finder", action: .showZIP)
         add("Show Capture Certificate in Finder…", action: .showCertificate)
+        menu.addItem(.separator())
+        let timeline = NSMenu(title: "Timeline")
+        timeline.delegate = self
+        timeline.autoenablesItems = true
+        add("Pause Display", action: .pauseDisplay, to: timeline)
+        add("Follow Latest", action: .followLatest, to: timeline)
+        add("Jump to Latest", action: .jumpToLatest, to: timeline)
+        timeline.addItem(.separator())
+        add("Clear View", action: .clearView, to: timeline)
+        add("Show Full Session", action: .fullSession, to: timeline)
+        add("Wrap Lines", action: .wrapLines, to: timeline)
+        timeline.addItem(.separator())
+        add("Load Older", action: .older, to: timeline)
+        add("Load Newer", action: .newer, to: timeline)
+        let timelineItem = NSMenuItem(title: "Timeline", action: nil, keyEquivalent: "")
+        timelineItem.submenu = timeline
+        menu.addItem(timelineItem)
         for name in [NSApplication.didBecomeActiveNotification, NSApplication.didUpdateNotification,
                      NSWindow.didBecomeKeyNotification, NSWindow.didBecomeMainNotification] {
             NotificationCenter.default.addObserver(self, selector: #selector(nativeContextChanged), name: name, object: nil)
@@ -124,21 +142,24 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         mainMenu.insertItem(item, at: index)
     }
 
-    private func add(_ title: String, action: Action, keyEquivalent: String = "") {
+    private func add(_ title: String, action: Action, keyEquivalent: String = "", to destination: NSMenu? = nil) {
         let item = NSMenuItem(title: title, action: #selector(performCaptureAction), keyEquivalent: keyEquivalent)
         item.target = self
         item.tag = action.rawValue
-        menu.addItem(item)
+        (destination ?? menu).addItem(item)
     }
 
     @objc private func nativeContextChanged(_ notification: Notification) { install() }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        for item in menu.items where !item.isSeparatorItem { item.isEnabled = validateMenuItem(item) }
+        for item in menu.items where !item.isSeparatorItem && item.submenu == nil { item.isEnabled = validateMenuItem(item) }
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        guard let action = Action(rawValue: item.tag), let store = target.captureStore else { return false }
+        guard let action = Action(rawValue: item.tag), let store = target.captureStore else {
+            item.state = .off
+            return false
+        }
         switch action {
         case .openSession: return !store.isBusy && !store.hasActiveCapture
         case .start: return store.canStart
@@ -149,6 +170,19 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
             return !store.isBusy && store.session?.canFinalize == true
         case .export, .showZIP: return store.session?.packagePath != nil
         case .showCertificate: return store.session?.caCertificatePath != nil
+        case .pauseDisplay:
+            item.title = store.isViewPaused ? "Resume Display" : "Pause Display"
+            return !store.isBusy && (store.session?.isActive == true || store.isViewPaused)
+        case .followLatest:
+            item.state = store.followLatest ? .on : .off
+            return store.session != nil && !store.isBusy
+        case .wrapLines:
+            item.state = store.wrapLines ? .on : .off
+            return store.session != nil && !store.isBusy
+        case .jumpToLatest, .clearView: return store.session != nil && !store.isBusy
+        case .fullSession: return store.session != nil && !store.isBusy && store.hiddenThroughSequence != nil
+        case .older: return !store.isBusy && !store.isLoadingTimeline && store.hasOlderEvents
+        case .newer: return !store.isBusy && !store.isLoadingTimeline && store.hasNewerEvents
         }
     }
 
@@ -161,6 +195,14 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         case .export: store.exportPackage()
         case .showZIP: store.revealPackage()
         case .showCertificate: store.revealCaptureCertificate()
+        case .pauseDisplay: Task { await store.togglePauseView() }
+        case .followLatest: Task { await store.setFollowLatest(!store.followLatest) }
+        case .jumpToLatest: Task { await store.jumpToLatest() }
+        case .clearView: Task { await store.clearView() }
+        case .fullSession: Task { await store.showFullSession() }
+        case .wrapLines: store.wrapLines.toggle()
+        case .older: Task { await store.loadOlderEvents() }
+        case .newer: Task { await store.loadNewerEvents() }
         }
     }
 }

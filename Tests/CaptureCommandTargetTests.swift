@@ -6,6 +6,47 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct CaptureCommandTargetTests {
+    @Test func nativeTimelineMenuReflectsPauseFollowWrapAndPaging() throws {
+        let windows = WindowProviders()
+        let target = CaptureCommandTarget(keyWindowProvider: { windows.key }, mainWindowProvider: { windows.main })
+        let capture = window()
+        let store = CaptureStore()
+        target.register(window: capture, store: store)
+        windows.key = capture
+        store.session = CaptureSession(isActive: true)
+        store.hasOlderEvents = true
+        let commands = CaptureCommandMenu(target: target)
+        let timeline = try #require(commands.menu.items.first { $0.title == "Timeline" }?.submenu)
+        timeline.update()
+        let pause = try #require(timeline.items.first { $0.title == "Pause Display" })
+        let follow = try #require(timeline.items.first { $0.title == "Follow Latest" })
+        let wrap = try #require(timeline.items.first { $0.title == "Wrap Lines" })
+        let fullSession = try #require(timeline.items.first { $0.title == "Show Full Session" })
+        let older = try #require(timeline.items.first { $0.title == "Load Older" })
+        let newer = try #require(timeline.items.first { $0.title == "Load Newer" })
+        #expect(pause.isEnabled)
+        #expect(follow.state == .on)
+        #expect(wrap.state == .off)
+        #expect(!fullSession.isEnabled)
+        #expect(older.isEnabled)
+        #expect(!newer.isEnabled)
+
+        store.isViewPaused = true
+        store.followLatest = false
+        store.wrapLines = true
+        store.hiddenThroughSequence = 42
+        store.hasNewerEvents = true
+        timeline.update()
+        #expect(pause.title == "Resume Display")
+        #expect(follow.state == .off)
+        #expect(wrap.state == .on)
+        #expect(fullSession.isEnabled)
+        #expect(newer.isEnabled)
+        store.isBusy = true
+        timeline.update()
+        #expect(timeline.items.filter { !$0.isSeparatorItem }.allSatisfy { !$0.isEnabled })
+    }
+
     @Test func nativeMenuValidatesAgainstTheCurrentWindowAtUpdateTime() throws {
         let windows = WindowProviders()
         let target = CaptureCommandTarget(keyWindowProvider: { windows.key }, mainWindowProvider: { windows.main })

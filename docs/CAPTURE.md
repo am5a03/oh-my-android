@@ -69,9 +69,23 @@ and can produce substantial volume. The exported context records the exact scope
 On Android, the field records investigation context and raw logs retain all
 processes. Use the timeline's text/source filters for inspection. Filters search
 the full session, including request/response details and bodies, and initially
-load the newest 400 matches. Displayed history stays visible as new events arrive;
-use **Load 400 older matches** to expand it. The count shows displayed matches,
-total matches and total captured events. Requests and responses are separate
+load the newest 400 matches. The native timeline indexes evidence on disk and
+keeps at most 1,200 lightweight previews in the panel; selected full details are
+loaded separately. Use the older/newer controls to page through the complete
+session. Reading or scrolling turns off **Follow Latest**, preserving the current
+rows and reading position while capture continues. **Jump to Latest** moves once;
+**Follow Latest** keeps following. Changing the display order never enables following.
+
+**Pause View** freezes the display at the current ingestion boundary; collectors
+keep recording. **Clear View** hides events already captured, across all source
+filters. It does not run `logcat -c`, delete raw files, or change the ZIP.
+**Show Full Session** reverses that view boundary. **Wrap Lines** changes previews
+only. Markers use the current host time while recording, independently of the
+selected row. A receipt confirms the marker was saved even when filters or the
+paused view hide it.
+
+The count distinguishes shown rows, matching events and total captured events.
+Requests and responses are separate
 events, so event counts are not a count of HTTP transactions. There is no automatic
 event-count retention limit on the raw session or ZIP; available disk space limits
 capture size. Network traffic

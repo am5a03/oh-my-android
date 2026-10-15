@@ -34,7 +34,7 @@ targets:
     platform: macOS
     sources:
       - path: Sources
-        excludes: ["MCP/**"]
+        excludes: ["MCP/**", "CaptureHost/**"]
       - path: CaptureRuntime
         type: folder
         buildPhase: resources
@@ -88,7 +88,7 @@ targets:
     platform: macOS
     sources:
       - path: Sources/Core
-        excludes: ["Imaging/**"]
+        excludes: ["Imaging/**", "Capture/**", "CaptureServices/**", "CaptureLifecycle/**", "CaptureModels.swift"]
       - path: Sources/Features
       - path: Sources/MCP
     settings:

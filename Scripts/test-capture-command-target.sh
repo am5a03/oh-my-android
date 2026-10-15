@@ -14,6 +14,13 @@ import Observation
     var isBusy = false
     var hasActiveCapture = false
     var canStart = false
+    var isLoadingTimeline = false
+    var isViewPaused = false
+    var followLatest = true
+    var wrapLines = false
+    var hiddenThroughSequence: Int64?
+    var hasOlderEvents = false
+    var hasNewerEvents = false
     var session: CaptureSession?
     func openSession() async {}
     func start() async {}
@@ -21,8 +28,16 @@ import Observation
     func exportPackage() {}
     func revealPackage() {}
     func revealCaptureCertificate() {}
+    func togglePauseView() async { isViewPaused.toggle() }
+    func setFollowLatest(_ value: Bool) async { followLatest = value }
+    func jumpToLatest() async {}
+    func clearView() async {}
+    func showFullSession() async {}
+    func loadOlderEvents() async {}
+    func loadNewerEvents() async {}
 }
 struct CaptureSession {
+    var isActive = false
     var canFinalize = false
     var needsRoutingRecovery = false
     var needsPackageRetry = false

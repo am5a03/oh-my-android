@@ -1,0 +1,327 @@
+import Darwin
+import Foundation
+import Testing
+@testable import CaptureTimelineCore
+
+/// Local synthetic evidence only; Python is an independent compatibility oracle, never a live collector.
+@Suite
+struct NativeTimelineTests {
+    @Test static func compatibilityAndRetention() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        try fixture.state(phase: "recording")
+        let log = "  1792035900.123456  12  34 I Ads: café Straße Σς ﬀ\r\n\nheader without a timestamp\n"
+        try fixture.write("logs/device.log", Data(log.utf8))
+        let request: [String: Any] = ["id": "flow-request", "timestamp": "2026-10-14T20:45:00.123456-0700", "source": "network",
+            "kind": "request", "summary": "POST https://example.invalid/ad", "raw_ref": "network/capture.mitm#flow",
+            "detail": ["flow_id": "one", "request_body": ["encoding": "utf-8", "text": "old CAFÉ body; a\"b: c, d\nline", "bytes": 29]]]
+        let response: [String: Any] = ["timestamp": "2026-10-15T03:45:01Z", "kind": "response", "summary": "200 POST https://example.invalid/ad",
+            "detail": ["response_body": ["encoding": "base64", "text": "AAH/", "bytes": 3], "status": 200]]
+        try fixture.writeJSONLines("network/events.jsonl", [request, response,
+            ["timestamp": "invalid", "received_at": "2026-10-15T03:45:02.000001Z", "kind": "tls_error", "detail": ["error": "unknown ca"]],
+            ["timestamp": "2026-10-15T03:45:03", "kind": "error", "detail": ["error": "naive source time"]]])
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        let initial = try await store.refresh()
+        try require(initial.totalCount == 6 && initial.counts["logs"] == 2 && initial.counts["network"] == 4, "source counts")
+        try require(initial.networkDiagnostics["decoded_http_events"] == 2 && initial.networkDiagnostics["certificate_rejections"] == 1, "diagnostic counters")
+        try await fixture.assertParity(store)
+
+        var query = NativeTimelineQuery()
+        query.source = "network"; query.search = "cafe\u{301} BODY"
+        let bodyMatch = try await store.query(query)
+        try require(bodyMatch.rows.count == 1, "Unicode-equivalent body substring search")
+        query.source = "logs"; query.search = "STRASSE σσ FF"
+        let folded = try await store.query(query)
+        try require(folded.rows.count == 1, "full case folding")
+        query.source = "network"; query.search = "AAH/"
+        let binary = try await store.query(query)
+        try require(binary.rows.count == 1, "base64 binary body searchable")
+        let detail = try await store.event(id: binary.rows[0].id)
+        try require(detail?.bodies.first?.content == "AAH/", "lazy full binary detail")
+
+        let stableIDs = Set(try await store.query(NativeTimelineQuery()).rows.map(\.id))
+        try fixture.append("logs/device.log", Data(String(repeating: "1792035999.000000  1  2 I Flood: later noise\n", count: 1_100).utf8))
+        let afterFlood = try await store.refresh()
+        try require(afterFlood.totalCount == 1_106, "incremental flood count")
+        query = NativeTimelineQuery(); query.source = "network"
+        let retained = try await store.query(query)
+        try require(retained.rows.count == 4 && Set(retained.rows.map(\.id)).isSubset(of: stableIDs), "device logs cannot evict network history")
+        query = NativeTimelineQuery(); query.limit = 37
+        let page = try await store.query(query)
+        try require(page.rows.count == 37 && page.hasBefore && !page.hasAfter, "bounded latest page")
+        query.before = page.firstCursor
+        let older = try await store.query(query)
+        try require(older.rows.count == 37 && Set(page.rows.map(\.id)).isDisjoint(with: older.rows.map(\.id)), "stable chronological paging")
+        query.before = nil; query.after = older.lastCursor
+        let later = try await store.query(query)
+        try require(later.rows.map(\.id) == page.rows.map(\.id), "after cursor returns nearest later page")
+        query.after = nil; query.newestFirst = true
+        let reversed = try await store.query(query)
+        try require(reversed.rows.map(\.id) == page.rows.reversed().map(\.id), "display direction does not change page")
+
+        // A late event has an earlier source time, but a newer ingress sequence.
+        try fixture.append("network/events.jsonl", try Fixture.line(["timestamp": "2020-01-01T00:00:00Z", "kind": "request", "summary": "late arrival"]))
+        _ = try await store.refresh()
+        query = NativeTimelineQuery(); query.minSequence = afterFlood.latestSequence
+        let cleared = try await store.query(query)
+        try require(cleared.rows.count == 1 && cleared.rows.first?.summary == "late arrival", "clear uses ingress, not source time")
+        query.minSequence = nil; query.maxSequence = afterFlood.latestSequence
+        let paused = try await store.query(query)
+        try require(paused.matchingCount == afterFlood.totalCount, "pause snapshot hides newly ingested events")
+
+        // Incomplete records are invisible until completed, including CRLF split across refreshes.
+        try fixture.append("logs/device.log", Data("1792035999.000001  1  2 I Tail: partial".utf8))
+        let pending = try await store.refresh()
+        try require(pending.totalCount == afterFlood.totalCount + 1, "incomplete line is buffered")
+        try fixture.append("logs/device.log", Data(" complete\r".utf8))
+        let pendingCR = try await store.refresh()
+        try require(pendingCR.totalCount == pending.totalCount, "terminal CR waits for possible LF")
+        try fixture.append("logs/device.log", Data([10]))
+        let completed = try await store.refresh()
+        try require(completed.totalCount == pending.totalCount + 1, "split CRLF produces exactly one record")
+        let reopened = try NativeTimelineStore(sessionDirectory: fixture.root)
+        let reopenedSnapshot = try await reopened.refresh()
+        try require(reopenedSnapshot.totalCount == completed.totalCount && reopenedSnapshot.latestSequence == completed.latestSequence, "durable index resumes without duplicates")
+
+        let marker = try await store.appendMarker(text: "Tapped ad \"A\"; $(echo never)\nnext step 🧭")
+        try require(marker.source == "marker" && marker.summary.contains("$(echo never)"), "native marker round trip")
+        try await fixture.assertParity(store)
+        let frozen = try await store.query(NativeTimelineQuery())
+        // Same inode, same length, and later append: prefix verification still detects a mutation.
+        var logData = try Data(contentsOf: fixture.url("logs/device.log"))
+        logData[0] = 9
+        let handle = try FileHandle(forWritingTo: fixture.url("logs/device.log"))
+        try handle.write(contentsOf: logData); try handle.close()
+        try fixture.append("logs/device.log", Data("1792035999.999999  1  2 I More: appended after mutation\n".utf8))
+        let rebuilt = try await store.refresh()
+        try require(rebuilt.generation > completed.generation && rebuilt.latestSequence > completed.latestSequence, "in-place mutation rebuilds and invalidates generation")
+        var stale = NativeTimelineQuery(); stale.before = frozen.firstCursor
+        do { _ = try await store.query(stale); throw TestFailure("stale cursor accepted") }
+        catch is NativeTimelineError { }
+        try await fixture.assertParity(store)
+
+        // Replace/truncate/delete files and normalize state changes; raw files stay authoritative.
+        try fixture.write("network/events.jsonl", try Fixture.line(["timestamp": 0, "kind": "request", "summary": "replacement"]))
+        _ = try await store.refresh()
+        query = NativeTimelineQuery(); query.source = "network"
+        try require(try await store.query(query).rows.count == 1, "replacement removes obsolete indexed events")
+        try FileManager.default.removeItem(at: fixture.url("logs/device.log"))
+        _ = try await store.refresh()
+        try await fixture.assertParity(store)
+        try fixture.state(phase: "saved")
+        try fixture.write("logs/device.log", Data("1792035999.000001  1  2 I Tail: no newline".utf8))
+        _ = try await store.refresh()
+        try await fixture.assertParity(store)
+        try fixture.append("logs/device.log", Data(" extended\n".utf8))
+        _ = try await store.refresh()
+        try await fixture.assertParity(store)
+        do { _ = try await store.appendMarker(text: "after stop"); throw TestFailure("terminal marker accepted") }
+        catch is NativeTimelineError { }
+        try await safetyChecks()
+        print("Native timeline checks passed (schema parity, body search, durable ingress, bounded paging, mutation rebuilds, partial lines, markers, safe files and streaming export).")
+    }
+
+    @Test static func timestampAndMalformedEvidenceParity() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        try fixture.state(phase: "saved")
+        let timestamps: [Any] = [0, -1.1234567, 1_792_035_900.1234567, true, NSNull(), " 1792035900.123456 ", "-1", "not-a-time",
+            "2026-10-15T03:45:00Z", "2026-10-15T03:45:00.123456Z", "2026-10-14T20:45:00.123456789-0700",
+            "2026-10-15T11:45:00.654321+08:00", "2026-10-15T03:45:00", "2026-10-15T03:45:00z",
+            "0001-01-01T00:00:00Z", "9999-12-31T23:59:59.999999Z", "2024-02-29T00:00:00Z", "2026-02-29T00:00:00Z"]
+        try fixture.writeJSONLines("network/events.jsonl", timestamps.map { ["timestamp": $0, "kind": "request", "summary": "timestamp parity"] })
+        try fixture.write("logs/device.log", Data("{\"timestamp\":\"2026-10-14 20:45:00.123456-0700\",\"eventMessage\":\"simulator fields\",\"pid\":12}\n".utf8))
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        _ = try await store.refresh()
+        try await fixture.assertParity(store)
+        // Retain malformed bytes/line references. Parser-specific error wording may differ.
+        try fixture.append("network/events.jsonl", Data([0xff, 0xfe, 0x0a]))
+        try fixture.append("network/events.jsonl", Data("{broken\n[]\n".utf8))
+        _ = try await store.refresh()
+        try await fixture.assertParity(store, ignoreParserWording: true)
+        let before = try await store.query(NativeTimelineQuery())
+        try fixture.write("session.json", JSONSerialization.data(withJSONObject: ["started_at": "2026-10-15T03:00:00Z", "phase": "saved",
+            "clock_calibration": ["logs": ["offset_ms": " 500.125 ", "uncertainty_ms": true, "method": "new probe"]]]))
+        let changed = try await store.refresh()
+        try require(changed.generation > before.generation, "normalization metadata changes rebuild the index")
+        try await fixture.assertParity(store, ignoreParserWording: true)
+    }
+
+    @Test static func finalTailAndLazyLargeDetails() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        try fixture.state(phase: "recording")
+        let summary = "Large " + String(repeating: "e\u{301}", count: 2_000)
+        let body = String(repeating: "response payload ", count: 20_000) + "needle at the end"
+        let event: [String: Any] = ["timestamp": "2026-10-15T03:45:00Z", "kind": "response", "summary": summary,
+            "detail": ["response_body": ["encoding": "utf-8", "text": body, "bytes": body.utf8.count]]]
+        try fixture.write("network/events.jsonl", NativeTimelineNormalizer.jsonData(event))
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        try require(try await store.refresh().totalCount == 0, "active incomplete network body remains buffered")
+        try fixture.state(phase: "stopping")
+        try require(try await store.refresh().totalCount == 0, "stopping alone does not assume collectors exited")
+        let final = try await store.refresh(collectorsStopped: true)
+        try require(final.totalCount == 1, "collector receipts permit final unterminated body")
+        let concurrentUI = try NativeTimelineStore(sessionDirectory: fixture.root)
+        try require(try await concurrentUI.refresh().totalCount == 1, "UI refresh retains host-finalized stopping tail")
+        let sessionBytes = try await concurrentUI.sessionData()
+        let session = try JSONSerialization.jsonObject(with: sessionBytes) as? [String: Any]
+        try require(session?["phase"] as? String == "stopping", "anchored session reader")
+        let page = try await store.query(NativeTimelineQuery())
+        try require(page.rows.count == 1 && page.rows[0].summary.unicodeScalars.count <= 1_024, "row previews have bounded scalar size")
+        let full = try await store.event(id: page.rows[0].id)
+        try require(full?.summary == summary && full?.bodies.first?.content == body, "lazy detail retains complete large body and summary")
+        var query = NativeTimelineQuery(); query.search = "needle at the end"
+        try require(try await store.query(query).matchingCount == 1, "search reaches the end of a large body")
+        try await fixture.assertParity(store)
+    }
+
+    @Test static func cancellationAndEmptyRebuildKeepIndexUsable() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        try fixture.state(phase: "recording")
+        try fixture.write("logs/device.log", Data(String(repeating: "1792035999.000001  1  2 I Cancel: retained evidence\n", count: 100).utf8))
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        let initial = try await store.refresh()
+        let operation = Task { try await store.query(NativeTimelineQuery()) }
+        operation.cancel()
+        await #expect(throws: CancellationError.self) { try await operation.value }
+        try require(try await store.query(NativeTimelineQuery()).matchingCount == 100, "cancelled read rolls back its transaction")
+        try FileManager.default.removeItem(at: fixture.url("logs/device.log"))
+        let empty = try await store.refresh()
+        try require(empty.totalCount == 0 && empty.latestSequence >= initial.latestSequence, "empty rebuild retains the durable ingress watermark")
+        try fixture.write("logs/device.log", Data("1792035999.000001  1  2 I New: after rebuild\n".utf8))
+        let replacement = try await store.refresh()
+        try require(replacement.latestSequence > initial.latestSequence, "rebuild never reuses ingress sequence")
+    }
+
+    static func safetyChecks() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        try fixture.state(phase: "saved")
+        try fixture.write("logs/device.log", Data("1792035999.000001  1  2 I Safe: original\n".utf8))
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        _ = try await store.refresh()
+        try FileManager.default.removeItem(at: fixture.url("logs/device.log"))
+        try FileManager.default.createSymbolicLink(at: fixture.url("logs/device.log"), withDestinationURL: fixture.url("session.json"))
+        do { _ = try await store.refresh(); throw TestFailure("evidence symlink accepted") }
+        catch is NativeTimelineError { }
+        try FileManager.default.removeItem(at: fixture.url("logs/device.log"))
+        try FileManager.default.createSymbolicLink(at: fixture.url("alias"), withDestinationURL: fixture.root)
+        do { _ = try NativeTimelineStore(sessionDirectory: fixture.url("alias")); throw TestFailure("root symlink accepted") }
+        catch is NativeTimelineError { }
+        let target = fixture.url("target.jsonl")
+        try FileManager.default.createSymbolicLink(at: target, withDestinationURL: fixture.url("session.json"))
+        do { try await store.exportTimeline(to: target); throw TestFailure("export symlink accepted") }
+        catch is NativeTimelineError { }
+        // An exact package allowlist must keep private cache files out of the ZIP.
+        let oracle = "import sys,json;sys.path.insert(0,sys.argv[1]);import evidence;from pathlib import Path;p=Path(sys.argv[2]);evidence.finalize_package(p,json.loads((p/'session.json').read_text()))"
+        _ = try Fixture.python(oracle, arguments: [Fixture.repository.appendingPathComponent("CaptureRuntime").path, fixture.root.path])
+        let names = try Fixture.python("import sys,zipfile,json;print(json.dumps(zipfile.ZipFile(sys.argv[1]).namelist()))", arguments: [fixture.url("capture-package.zip").path])
+        try require(!String(decoding: names, as: UTF8.self).contains("native-timeline"), "private index excluded from export")
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["CAPTURE_TIMELINE_BENCHMARK"] == "1"))
+    static func benchmark() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        try fixture.state(phase: "recording")
+        let file = fixture.url("logs/device.log")
+        FileManager.default.createFile(atPath: file.path, contents: nil)
+        let output = try FileHandle(forWritingTo: file)
+        for batch in 0..<100 {
+            var data = Data()
+            for item in 0..<10_000 { data.append(Data("1792035999.000001  1  2 I Bench: event \(batch * 10_000 + item)\n".utf8)) }
+            try output.write(contentsOf: data)
+        }
+        try output.close()
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        let clock = ContinuousClock(), start = clock.now
+        let imported = try await store.refresh(), importDuration = start.duration(to: clock.now)
+        let queryStart = clock.now
+        let page = try await store.query(NativeTimelineQuery())
+        let queryDuration = queryStart.duration(to: clock.now)
+        let refreshStart = clock.now
+        _ = try await store.refresh()
+        let unchangedDuration = refreshStart.duration(to: clock.now)
+        try fixture.append("logs/device.log", Data(String(repeating: "1792035999.000002  1  2 I Bench: incremental append\n", count: 1_000).utf8))
+        let appendStart = clock.now
+        let appended = try await store.refresh()
+        let appendedDuration = appendStart.duration(to: clock.now)
+        var search = NativeTimelineQuery(); search.search = "event 123456"
+        let searchStart = clock.now
+        let matched = try await store.query(search)
+        let searchDuration = searchStart.duration(to: clock.now)
+        let cancelQuery = search
+        let cancelledSearch = Task { try await store.query(cancelQuery) }
+        try await Task.sleep(for: .milliseconds(10))
+        let cancelStart = clock.now
+        cancelledSearch.cancel()
+        await #expect(throws: CancellationError.self) { try await cancelledSearch.value }
+        let cancelDuration = cancelStart.duration(to: clock.now)
+        try require(try await store.query(NativeTimelineQuery()).rows.count == 400, "cancelled million-row search leaves index usable")
+        var usage = rusage()
+        getrusage(RUSAGE_SELF, &usage)
+        try require(imported.totalCount == 1_000_000 && page.rows.count == 400, "million-event bounded page")
+        try require(appended.totalCount == 1_001_000 && matched.matchingCount == 1, "million-event append and search")
+        print("1M events: import \(importDuration), latest page \(queryDuration), unchanged refresh \(unchangedDuration), +1000 refresh \(appendedDuration), substring search \(searchDuration), search cancellation \(cancelDuration), peak RSS \(Double(usage.ru_maxrss) / 1_048_576) MiB; 400 lightweight rows returned.")
+    }
+
+    struct TestFailure: Error { let message: String; init(_ message: String) { self.message = message } }
+    static func require(_ condition: Bool, _ message: String) throws { if !condition { throw TestFailure(message) } }
+
+    struct Fixture {
+        static let repository = ProcessInfo.processInfo.environment["CAPTURE_TEST_REPOSITORY"].map { URL(fileURLWithPath: $0) }
+            ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let root: URL
+        init() throws {
+            root = FileManager.default.temporaryDirectory.appendingPathComponent("native-timeline-test-\(UUID().uuidString)")
+            for name in ["", "logs", "network", "timeline"] {
+                try FileManager.default.createDirectory(at: root.appendingPathComponent(name), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            }
+        }
+        func remove() { try? FileManager.default.removeItem(at: root) }
+        func url(_ relative: String) -> URL { root.appendingPathComponent(relative) }
+        func write(_ relative: String, _ data: Data) throws { try data.write(to: url(relative), options: .atomic) }
+        func append(_ relative: String, _ data: Data) throws {
+            let file = try FileHandle(forWritingTo: url(relative))
+            try file.seekToEnd(); try file.write(contentsOf: data); try file.close()
+        }
+        func state(phase: String) throws {
+            try write("session.json", JSONSerialization.data(withJSONObject: ["started_at": "2026-10-15T03:00:00.000000Z", "phase": phase,
+                "sources": ["logs": "observed", "network": "observed"], "clock_calibration": ["logs": ["offset_ms": 250.125, "uncertainty_ms": 50, "method": "synthetic_probe"],
+                                                                                                   "network": ["offset_ms": 0, "uncertainty_ms": 1, "method": "host_clock"]]]))
+        }
+        static func line(_ value: [String: Any]) throws -> Data { var data = try NativeTimelineNormalizer.jsonData(value); data.append(10); return data }
+        func writeJSONLines(_ relative: String, _ values: [[String: Any]]) throws { try write(relative, values.reduce(into: Data()) { $0.append(try Self.line($1)) }) }
+        func assertParity(_ store: NativeTimelineStore, ignoreParserWording: Bool = false) async throws {
+            let destination = url("normalized.jsonl")
+            try await store.exportTimeline(to: destination)
+            let actualData = try Data(contentsOf: destination)
+            let actual = try actualData.split(separator: 10).map { try JSONSerialization.jsonObject(with: Data($0)) as! NSDictionary }
+            let oracle = "import sys,json;sys.path.insert(0,sys.argv[1]);import evidence;from pathlib import Path;print(json.dumps(evidence.read_events(Path(sys.argv[2])),ensure_ascii=False))"
+            let expected = try JSONSerialization.jsonObject(with: Self.python(oracle, arguments: [Self.repository.appendingPathComponent("CaptureRuntime").path, root.path])) as! [NSDictionary]
+            func comparable(_ rows: [NSDictionary]) -> [NSDictionary] {
+                guard ignoreParserWording else { return rows }
+                return rows.map { row in
+                    guard row["kind"] as? String == "parse_error", let copy = row.mutableCopy() as? NSMutableDictionary,
+                          let detail = (copy["detail"] as? NSDictionary)?.mutableCopy() as? NSMutableDictionary else { return row }
+                    detail["parse_error"] = "parser-specific diagnostic"
+                    copy["detail"] = detail
+                    return copy
+                }
+            }
+            guard comparable(actual) == comparable(expected) else {
+                let mismatch = zip(comparable(actual), comparable(expected)).first { $0 != $1 }
+                throw TestFailure("Python normalization mismatch: actual \(actual.count), expected \(expected.count); first difference \(String(describing: mismatch))")
+            }
+        }
+        static func python(_ script: String, arguments: [String]) throws -> Data {
+            let process = Process(), pipe = Pipe()
+            let preferred = FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/python3.12") ? "/opt/homebrew/bin/python3.12" : "/usr/bin/python3"
+            process.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["CAPTURE_ORACLE_PYTHON"] ?? preferred)
+            process.arguments = ["-B", "-c", script] + arguments
+            process.standardOutput = pipe
+            try process.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { throw TestFailure("Python compatibility oracle failed") }
+            return data
+        }
+    }
+}

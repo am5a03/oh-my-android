@@ -341,6 +341,8 @@ struct CaptureView: View {
                 .labelsHidden().frame(width: 140)
                 TextField("Filter URL, message, kind or detail…", text: $store.search)
                     .textFieldStyle(.roundedBorder).frame(maxWidth: 350)
+                    .accessibilityLabel("Filter timeline events")
+                    .help("Search event text and details within the current source and view boundaries. All evidence remains in the saved session.")
                 if !store.search.isEmpty || store.sourceFilter != "all" {
                     Button("Clear filters") { store.search = ""; store.sourceFilter = "all" }
                 }
@@ -352,24 +354,36 @@ struct CaptureView: View {
                 .labelsHidden().frame(width: 130)
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
+            timelineControls
+                .padding(.horizontal, 16).padding(.bottom, 8)
             HStack(spacing: 10) {
                 Text(store.timelineCountText).monospacedDigit()
                 if store.isLoadingTimeline { ProgressView().controlSize(.small) }
                 if store.hasOlderEvents {
-                    Button("Load 400 older matches") { Task { await store.loadOlderEvents() } }
+                    Button("Load Older") { Task { await store.loadOlderEvents() } }
                         .disabled(store.isBusy || store.isLoadingTimeline)
+                        .help("Load the previous page of matching events while holding your reading position.")
+                }
+                if store.hasNewerEvents {
+                    Button("Load Newer") { Task { await store.loadNewerEvents() } }
+                        .disabled(store.isBusy || store.isLoadingTimeline)
+                        .help("Load the next page of matching events while keeping Follow Latest off.")
                 }
                 Spacer()
-                Text("Filters search the full session. Displayed history stays while recording.")
             }
             .font(.caption).foregroundStyle(.secondary)
             .padding(.horizontal, 16).padding(.bottom, 8)
+            if let hint = store.presentationHint {
+                Label(hint, systemImage: store.isViewPaused ? "pause.circle" : "hand.raised")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 16).padding(.bottom, 8)
+            }
             HSplitView {
                 eventList.frame(minWidth: 460)
                 eventDetail.frame(minWidth: 290, idealWidth: 350)
             }
             VStack(alignment: .leading, spacing: 5) {
-                Text(store.session?.isActive == true ? "Add a note at the current time. Selecting a row only opens its details." : "Start recording to add a time marker.")
+                Text(store.session?.phase == "recording" ? "Add a note at the current time. Selecting a row only opens its details." : "Start recording to add a time marker.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     Image(systemName: "bookmark").accessibilityHidden(true)
@@ -378,19 +392,73 @@ struct CaptureView: View {
                         .accessibilityLabel("Marker note at the current time")
                         .help("Type a note while recording, then choose Add Marker or press Return. The marker uses the current time, not the selected row’s time.")
                         .onSubmit { Task { await store.addMarker() } }
-                    Button("Add Marker") { Task { await store.addMarker() } }
-                        .disabled(store.session?.isActive != true || store.isBusy || store.markerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button(store.isAddingMarker ? "Saving Marker…" : "Add Marker") { Task { await store.addMarker() } }
+                        .disabled(store.session?.phase != "recording" || store.isBusy || store.isAddingMarker || store.markerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .help(markerHelp)
                         .accessibilityHint(markerHelp)
                 }
-                .disabled(store.session?.isActive != true)
+                .disabled(store.session?.phase != "recording")
+                if let receipt = store.markerReceipt {
+                    Label(receipt, systemImage: "checkmark.circle")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             .padding(12)
         }
     }
 
+    private var timelineControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                playbackControls
+                Divider().frame(height: 20)
+                viewControls
+                Spacer(minLength: 0)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) { playbackControls; Spacer(minLength: 0) }
+                HStack(spacing: 8) { viewControls; Spacer(minLength: 0) }
+            }
+        }
+        .disabled(store.session == nil || store.isBusy)
+    }
+
+    @ViewBuilder
+    private var playbackControls: some View {
+        Button { Task { await store.togglePauseView() } } label: {
+            Label(store.isViewPaused ? "Resume Display" : "Pause Display", systemImage: store.isViewPaused ? "play.fill" : "pause.fill")
+        }
+        .disabled(store.session?.isActive != true && !store.isViewPaused)
+        .help(store.isViewPaused ? "Show events captured while the display was paused." : "Freeze this timeline for inspection. Device logs and network capture continue to be saved.")
+        Toggle(isOn: Binding(get: { store.followLatest }, set: { enabled in Task { await store.setFollowLatest(enabled) } })) {
+            Label("Follow Latest", systemImage: store.newestFirst ? "arrow.up.to.line" : "arrow.down.to.line")
+        }
+        .toggleStyle(.button)
+        .help(store.isViewPaused ? "This following preference takes effect when the display resumes." : "Keep the newest matching event in view. Scrolling or selecting an event turns this off.")
+        Button { Task { await store.jumpToLatest() } } label: {
+            Label("Jump to Latest", systemImage: "forward.end")
+        }
+        .help("Resume the display and show the newest matching event once. This does not turn on Follow Latest.")
+    }
+
+    @ViewBuilder
+    private var viewControls: some View {
+        Button { Task { await store.clearView() } } label: {
+            Label("Clear View", systemImage: "eraser")
+        }
+        .help("Hide events captured so far from this view. The device log buffer, saved evidence and export are preserved.")
+        if store.hiddenThroughSequence != nil {
+            Button("Show Full Session") { Task { await store.showFullSession() } }
+                .help("Restore events hidden by Clear View. Source, search and pause settings still apply.")
+        }
+        Toggle(isOn: $store.wrapLines) { Label("Wrap Lines", systemImage: "text.word.spacing") }
+            .toggleStyle(.button)
+            .help("Wrap long event previews in the list. Select an event to inspect its complete text and bodies.")
+    }
+
     private var markerHelp: String {
-        if store.session?.isActive != true { return "Start recording to add a marker at the current time." }
+        if store.session?.phase != "recording" { return "Start recording to add a marker at the current time." }
+        if store.isAddingMarker { return "Saving your marker…" }
         if store.isBusy { return "Wait for the current operation to finish, then add your note." }
         if store.markerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Type a note first, such as Tapped the banner ad." }
         return "Add your note at the current time. Choose All Sources or Markers to see it in the timeline."
@@ -399,29 +467,29 @@ struct CaptureView: View {
     @ViewBuilder
     private var eventList: some View {
         if store.visibleEvents.isEmpty {
-            ContentUnavailableView(store.isLoadingTimeline || !store.timelineMatchesFilters && store.session != nil ? "Loading timeline…" : (store.timeline?.totalCount ?? 0) > 0 ? "No matching events" : "No evidence yet", systemImage: "list.bullet.rectangle",
-                description: Text(!store.search.isEmpty || store.sourceFilter != "all" ? "Filters search all captured events. Clear the filters to see other evidence." : (store.hasActiveCapture ? "Use the selected device and add markers while recording. A started collector is not proof of captured traffic." : "Select a device and capture sources, then start a session.")))
+            ContentUnavailableView(emptyTimelineTitle, systemImage: "list.bullet.rectangle", description: Text(emptyTimelineHelp))
         } else {
-            List(selection: $store.selectedEventID) {
-                ForEach(store.visibleEvents) { event in
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: event.source == "network" ? "network" : (event.source == "marker" ? "bookmark.fill" : "text.alignleft"))
-                            .foregroundStyle(event.source == "marker" ? Color.orange : Color.secondary)
-                            .frame(width: 16)
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 6) {
-                                Text(event.timestamp).font(.caption.monospaced()).foregroundStyle(.secondary)
-                                Text(event.source.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                            }
-                            Text(event.summary).font(.system(.body, design: .monospaced)).lineLimit(2)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                    .tag(event.id)
-                }
-            }
-            .listStyle(.inset)
+            CaptureTimelineList(rows: store.visibleEvents, selectedEventID: $store.selectedEventID,
+                followLatest: store.followLatest && !store.isViewPaused, newestFirst: store.newestFirst, wrapLines: store.wrapLines,
+                jumpToLatestToken: store.jumpToLatestToken, onInteraction: { store.userDidInteractWithTimeline() })
         }
+    }
+
+    private var emptyTimelineTitle: String {
+        if store.isLoadingTimeline || !store.timelineMatchesFilters && store.session != nil { return "Loading Timeline…" }
+        if store.hiddenThroughSequence != nil { return "No Events in This View" }
+        if store.isViewPaused { return "Display Paused" }
+        if (store.timeline?.totalCount ?? 0) > 0 { return "No Matching Events" }
+        return store.session == nil ? "No Capture Open" : "No Events Captured Yet"
+    }
+
+    private var emptyTimelineHelp: String {
+        if store.isViewPaused { return "Resume Display to see new events. Recorded evidence is retained while this view is paused." }
+        if store.hiddenThroughSequence != nil { return "Clear View hides earlier events. Show Full Session restores them; saved evidence stays intact." }
+        if !store.search.isEmpty || store.sourceFilter != "all" { return "Try another source or search term, or clear the filters to see other events." }
+        return store.hasActiveCapture
+            ? "Use the selected device and add markers while recording. Events appear here as they are captured."
+            : "Select a device and capture sources, then start recording. Choose Open Session to inspect an existing capture."
     }
 
     @ViewBuilder
@@ -429,6 +497,10 @@ struct CaptureView: View {
         if let event = store.selectedEvent {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if !store.visibleEvents.contains(where: { $0.id == event.id }) {
+                        Label("Selected event is outside the current view.", systemImage: "pin")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     Text(event.kind).font(.headline)
                     Text(event.summary).font(.system(.body, design: .monospaced))
                     Divider()
@@ -455,6 +527,15 @@ struct CaptureView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
             }
+        } else if store.isLoadingSelectedEvent {
+            VStack(spacing: 8) {
+                ProgressView()
+                Text("Loading Selected Event…").foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if store.selectedEventID != nil {
+            ContentUnavailableView("Event Unavailable", systemImage: "doc.text.magnifyingglass",
+                description: Text("Select another event or reopen the session to retry loading its details."))
         } else {
             ContentUnavailableView("Inspect an event", systemImage: "sidebar.right", description: Text("Select a log, request or marker to inspect details and its raw evidence reference."))
         }
