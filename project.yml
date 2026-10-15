@@ -35,6 +35,9 @@ targets:
     sources:
       - path: Sources
         excludes: ["MCP/**"]
+      - path: CaptureRuntime
+        type: folder
+        buildPhase: resources
     dependencies:
       # The MCP server ships inside the app: Contents/MacOS/ohmyandroid-mcp, signed with it.
       - target: ohmyandroid-mcp

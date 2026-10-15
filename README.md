@@ -110,6 +110,12 @@ Then start an emulator and ask your agent: *"Take a screenshot of the emulator a
 
 ## Features
 
+**Capture prototype:** the **Capture Network & Logs…** menu collects Android or
+iOS Simulator network traffic and device logs into one ZIP with a shared timeline.
+It includes request/response bodies, reproduction markers and evidence references
+for engineer or AI handoff. See [setup, scope and proof workflow](docs/CAPTURE.md).
+Physical iPhone support is planned for a later phase.
+
 | | What you get |
 |---|---|
 | 🎨 **Appearance** | Dark mode · Font size (0.85× → 2×) · Display size · Language and locale, incl. RTL and pseudo-locales · Rotate |

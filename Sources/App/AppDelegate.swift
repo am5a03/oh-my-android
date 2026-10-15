@@ -8,6 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var panel: PanelController?
     private var inspector: InspectorWindowController?
     private var layoutInspector: LayoutInspectorWindowController?
+    private var capture: CaptureWindowController?
+    private var awaitingCaptureStop = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let inspector = InspectorWindowController(store: InspectorStore(reader: RunAsAppDataReader()))
@@ -34,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         panel = PanelController(model: model)
         panel?.show()
+        if ProcessInfo.processInfo.arguments.contains("--capture") { openCapture() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -41,9 +44,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         inspector?.close()
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let capture, capture.hasActiveCapture else { return .terminateNow }
+        guard !awaitingCaptureStop else { return .terminateLater }
+        awaitingCaptureStop = true
+        Task { @MainActor in
+            await capture.stopBeforeQuit()
+            awaitingCaptureStop = false
+            // Keep the recovery UI available when finalization/restoration still needs attention.
+            if capture.hasActiveCapture { capture.show() }
+            sender.reply(toApplicationShouldTerminate: !capture.hasActiveCapture)
+        }
+        return .terminateLater
+    }
+
     /// Menu-bar entry points; the panel icons call the same host actions.
     func openLayoutInspector() { if let context = model.context { model.host.openLayoutInspector(context, nil) } }
     func openDataInspector() { if let context = model.context { model.host.openDataInspector(context) } }
+    func openCapture() {
+        if capture == nil { capture = CaptureWindowController() }
+        capture?.show()
+    }
 
     /// PNG/JPEG opened with the app (Dock drop, "Open with", `open -a`) becomes a design overlay.
     func application(_ application: NSApplication, open urls: [URL]) {
