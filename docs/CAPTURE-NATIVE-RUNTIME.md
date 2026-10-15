@@ -8,8 +8,9 @@ component is the mitmproxy network addon, loaded by the installed or bundled
 The portable evidence format remains [schema 1](CAPTURE-PACKAGE.md). The runtime
 implements Android, booted iOS Simulator and paired physical iPhone capture.
 Physical iPhone combines USB device logs and a phone-controlled WireGuard network
-tunnel in the same timeline and ZIP. This implementation checkpoint does not yet
-claim a completed live physical-iPhone end-to-end proof.
+tunnel in the same timeline and ZIP. Separate physical USB-log and network-only
+recordings have been validated; a completed combined hardware proof remains
+pending. See the [physical iPhone observations](CAPTURE-PROOF.md#physical-iphone-checkpoint).
 
 ## Components and entry points
 
@@ -243,7 +244,11 @@ or establish live SDK coverage. Hardware/Simulator smoke checks still need to
 confirm compiled helpers and installed mitmproxy operate together on the target
 machine. The earlier live Android/Simulator proofs remain scoped to those
 targets; the current physical-iPhone implementation still requires its own
-completed combined logs/network/export proof. Pinning, QUIC and proxy bypass
+completed combined logs/network/export proof. The separate network-only hardware
+proof verified exact Safari/HAR/native/timeline bodies, but the bundled engine
+crashed during shutdown and its ZIP correctly retained partial status. Whole-device
+logging also produced excessive raw/index volume; app scope, recording limits,
+compact indexing and clean shutdown remain release work. Pinning, QUIC and proxy bypass
 remain capture gaps. Prepared builds bundle the pinned Android and network
 dependencies described in [distribution](CAPTURE-DISTRIBUTION.md); bundling the
 external iPhone USB tools and validating Developer ID/notarization remain

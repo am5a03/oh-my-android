@@ -14,9 +14,11 @@ iPhone; its private profile and the public CA are configured through
 **Set Up iPhone Capture…**. See [the iPhone workflow](CAPTURE.md).
 
 The physical-iPhone implementation checkpoint adds device discovery, USB logs
-and WireGuard lifecycle support. It does not yet establish a completed live
-physical-iPhone capture/export proof or change the earlier Android/Simulator
-proof results. The prepared build still contains only the dependency payloads
+and WireGuard lifecycle support. Separate physical USB-log and network-only
+capture/export runs are verified in the [proof report](CAPTURE-PROOF.md#physical-iphone-checkpoint).
+A completed combined hardware proof remains pending. The network engine's
+observed shutdown crash and whole-device log volume must be resolved before an
+AdOps release. The prepared build still contains only the dependency payloads
 listed below; it does not silently install the extra USB collector.
 
 The reviewed dependency lock currently supports **Apple Silicon / arm64 only**:

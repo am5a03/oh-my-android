@@ -128,7 +128,7 @@ ownership conflicts, process failure, recovery, archive retry, timestamp parsing
 symlink exclusion and real local-proxy body preservation. The existing Android
 quick-actions and Simulator suites also pass, with 25 and 37 checks respectively.
 
-## Remaining work before an AdOps release
+## Remaining work at the initial Android/Simulator checkpoint
 
 1. Bundle and sign the runtime dependencies and an authorized network helper.
    The prototype currently requires Python, mitmdump and Xcode developer tools.
@@ -233,3 +233,70 @@ This establishes the bundled runtime path on this development Mac. A clean PATH
 does not substitute for testing a fresh Mac. Developer ID signing, Apple
 notarization/stapling and Intel support remain unverified. The prepared artifact
 is ad-hoc signed for development, and no Gatekeeper setting was changed.
+
+## Physical iPhone checkpoint
+
+Observed on 14 October 2026, Vancouver time, using the connected paired iPhone
+on iOS 27.0 and the arm64 development build. Physical device discovery, USB logs
+and WireGuard capture are implemented in Swift orchestration. The network engine
+remains bundled mitmproxy 12.2.3 with Python 3.14.4.
+
+USB logs were verified in a separate logs-only recording: the saved ZIP contained
+2,577 timeline events, including 2,286 parsed timestamped iPhone messages. Package
+checksums passed, logs were observed and the session was saved successfully.
+Other retained lines remain explicit instead of being discarded or assigned a
+manufactured device timestamp.
+
+The first combined setup recording exposed an unacceptable volume problem:
+approximately 1.8 GB and 11.3 million raw lines accumulated in about 15 minutes.
+Its disposable SQLite index and rollback journal amplified disk use and blocked
+the final save. At the user's request, the export process was terminated after
+both collector shutdown receipts and routing restoration were verified. The
+session was marked partial with export cancellation recorded. Approximately
+45 GB of regenerable index/journal files were removed after verifying no process
+had them open; raw logs, network evidence and markers were retained. That setup
+recording did not produce a combined evidence ZIP.
+
+The user then requested skipping whole-device logs. A fresh **network-only**
+capture ran through the app UI, using the existing WireGuard profile and capture
+CA. A nonce marker was added through the app and acknowledged immediately. The
+user ran the Safari proof, turned the phone tunnel off, and confirmed Stop & Save.
+
+| Network-only physical iPhone observation | Result |
+| --- | --- |
+| Device-originated HTTPS POST | HTTP 200 from `https://httpbingo.org/anything` |
+| Request body | 4,776 bytes, including Unicode and a long synthetic payload |
+| Response body | 10,880 bytes |
+| Safari / HAR / native / timeline body equality | Exact request and response matches |
+| Tunnel client address | `10.0.0.1` in normalized and native evidence |
+| Shared timeline | 366 network events and one user marker |
+| Evidence ZIP | 10 files; 19,737,698 bytes; checksums and raw references passed |
+| Device logs | Not selected; this run makes no USB-log correlation claim |
+| Phone tunnel off | User-confirmed; recorded in package context |
+| Result | Partial; saved with warnings |
+
+The native UI displayed the saved confirmation with Export ZIP and Show in Finder.
+Filtering by the proof nonce located its request, response and marker; both full
+body disclosures opened successfully. The proof server and all capture workers
+were stopped after verification. Raw captures and Safari receipts remain local
+and outside Git.
+
+The partial result is intentional: background traffic retained 104 TLS errors and
+13 request errors, and the network engine exited with SIGSEGV (`-11`) during Stop.
+No proof body or in-flight proof request was missing. The macOS crash report
+shows a Tokio worker acquiring Python's GIL through the Rust logger while another
+thread finalized Python. This is consistent with a native thread/finalization
+failure; its root cause and fix are unconfirmed. Upstream has a related
+[WireGuard shutdown crash report](https://github.com/mitmproxy/mitmproxy/issues/5708),
+which does not establish that every observed crash has the same cause. The
+companion preserves the abnormal exit and partial status rather than calling the
+lifecycle clean.
+
+These results establish physical USB logging and decrypted network capture in
+separate live recordings. Combined iPhone evidence packaging is covered by
+synthetic lifecycle tests; a completed combined hardware proof remains pending.
+Before an AdOps release, prioritize app-scoped logs with SDK debug messages,
+explicit recording-size limits, a compact index with visible save progress, and
+verified clean network-engine shutdown. Physical USB tools still require an
+external libimobiledevice installation; IPv6, pinning, privacy redaction and
+manual phone VPN toggles remain documented limits.
