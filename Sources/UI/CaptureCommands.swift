@@ -89,6 +89,7 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     private enum Action: Int {
         case openSession = 1, start, stop, export, showZIP, showCertificate
         case pauseDisplay, followLatest, jumpToLatest, clearView, fullSession, wrapLines, older, newer
+        case setup
     }
 
     init(target: CaptureCommandTarget) {
@@ -97,6 +98,7 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         menu.delegate = self
         menu.autoenablesItems = true
         add("Open Session…", action: .openSession)
+        add("Set Up Capture…", action: .setup)
         menu.addItem(.separator())
         add("Start Capture", action: .start)
         add("Stop & Save", action: .stop, keyEquivalent: ".")
@@ -161,13 +163,14 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
             return false
         }
         switch action {
+        case .setup: return !store.isBusy
         case .openSession: return !store.isBusy && !store.hasActiveCapture
         case .start: return store.canStart
         case .stop:
-            item.title = if store.session?.needsRoutingRecovery == true { "Restore Connection & Save" }
-                else if !store.hasActiveCapture && store.session?.needsPackageRetry == true { "Retry Save" }
+            item.title = if store.operationSession?.needsRoutingRecovery == true { "Restore Connection & Save" }
+                else if !store.hasActiveCapture && store.operationSession?.needsPackageRetry == true { "Retry Save" }
                 else { "Stop & Save" }
-            return !store.isBusy && store.session?.canFinalize == true
+            return !store.isOperationBusy && store.operationSession?.canFinalize == true
         case .export, .showZIP: return store.session?.packagePath != nil
         case .showCertificate: return store.session?.caCertificatePath != nil
         case .pauseDisplay:
@@ -189,6 +192,7 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     @objc private func performCaptureAction(_ sender: NSMenuItem) {
         guard validateMenuItem(sender), let action = Action(rawValue: sender.tag), let store = target.captureStore else { return }
         switch action {
+        case .setup: store.showSetup()
         case .openSession: Task { await store.openSession() }
         case .start: Task { await store.start() }
         case .stop: Task { await store.stop() }

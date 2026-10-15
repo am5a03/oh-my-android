@@ -15,6 +15,10 @@ struct CaptureView: View {
     private let minimumEventPaneHeight: CGFloat = 180
 
     var body: some View {
+        Group {
+            if store.isSetupPresented {
+                CaptureSetupView(store: store, setup: store.setup)
+            } else {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 if let notice = store.externalRequestNotice {
@@ -42,6 +46,8 @@ struct CaptureView: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
             }
         }
+            }
+        }
         .frame(minWidth: 960, minHeight: 680)
         .onChange(of: store.session?.id) { showCaptureWarnings = false }
         .sheet(isPresented: $showIPhoneSetup) {
@@ -60,6 +66,12 @@ struct CaptureView: View {
                     .accessibilityHint(openSessionHelp)
             }
             ToolbarItemGroup(placement: .automatic) {
+                if !store.isSetupPresented {
+                    Button { store.showSetup() } label: {
+                        toolbarLabel("Set Up Capture", symbol: "wand.and.stars")
+                    }
+                    .help("Choose an app, prepare a device and check the evidence before recording.")
+                }
                 Button { store.exportPackage() } label: {
                     toolbarLabel("Export ZIP…", symbol: "archivebox")
                 }
@@ -94,7 +106,9 @@ struct CaptureView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                if store.hasActiveCapture || store.session?.needsPackageRetry == true {
+                if store.isSetupPresented {
+                    EmptyView()
+                } else if store.hasActiveCapture || store.session?.needsPackageRetry == true {
                     Button { Task { await store.stop() } } label: {
                         toolbarLabel(stopTitle, symbol: store.hasActiveCapture ? "stop.fill" : "arrow.clockwise")
                     }
@@ -143,6 +157,7 @@ struct CaptureView: View {
                     savedCaptureActions
                 }
             }
+            CaptureTaskCoverageView(session: session)
             if hasWarnings {
                 captureWarnings(session, maximumHeight: 110)
             }

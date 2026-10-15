@@ -22,12 +22,15 @@ import Observation
     var hasOlderEvents = false
     var hasNewerEvents = false
     var session: CaptureSession?
+    var operationSession: CaptureSession? { session }
+    var isOperationBusy: Bool { isBusy }
     func openSession() async {}
     func start() async {}
     func stop() async {}
     func exportPackage() {}
     func revealPackage() {}
     func revealCaptureCertificate() {}
+    func showSetup() {}
     func togglePauseView() async { isViewPaused.toggle() }
     func setFollowLatest(_ value: Bool) async { followLatest = value }
     func jumpToLatest() async {}
