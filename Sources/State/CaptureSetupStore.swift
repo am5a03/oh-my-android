@@ -34,11 +34,14 @@ final class CaptureSetupStore {
     private(set) var recordingSessionID: String?
     private(set) var browserHTTPSObserved = false
     private(set) var phoneOriginConfirmed = false
+    private(set) var isExportingReport = false
     @ObservationIgnored private var checkDeadline: Task<Void, Never>?
     @ObservationIgnored private var reportRevision = UUID()
     @ObservationIgnored private var checkIdentityFingerprint: String?
     @ObservationIgnored private var checkOwnerConfiguration: String?
     @ObservationIgnored private var reportConfiguration: String?
+    @ObservationIgnored private var rememberedPlanDefaults: UserDefaults?
+    private static let rememberedPlanKey = "capture.setup.appliedPlan.v1"
 
     var hasLiveCheck: Bool { isLaunchingCheck || checkCapture?.hasActiveCapture == true }
 
@@ -46,10 +49,40 @@ final class CaptureSetupStore {
         if reportConfiguration != configurationKey(owner) { report = nil; browserHTTPSObserved = false }
     }
 
+    func restoreRememberedPlan(_ owner: CaptureStore, defaults: UserDefaults) {
+        rememberedPlanDefaults = defaults
+        guard let data = defaults.data(forKey: Self.rememberedPlanKey) else { return }
+        do {
+            try reviewPlan(data: data)
+            applyPendingPlan(owner)
+            notice = "Your last capture task is ready. Reconnect its device; setup checks will run again."
+            owner.isSetupPresented = true
+        } catch {
+            notice = "The saved capture task could not be read. Open a new plan or choose manual capture."
+        }
+    }
+
+    func exportReadinessReport() async {
+        guard let report, !isExportingReport else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.zip]
+        panel.nameFieldStringValue = "Mobile-Capture-Setup-Report.zip"
+        panel.message = "Save a setup report for your engineer. It includes named readiness checks and the capture task, without recorded requests, logs, private keys or tunnel profiles."
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        isExportingReport = true
+        defer { isExportingReport = false }
+        do {
+            let url = try await CaptureReadinessExport.export(report: report, plan: appliedPlan, to: destination)
+            notice = "Setup report saved. Send this ZIP to your engineer to investigate the missing prerequisites."
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            error = nil
+        } catch { self.error = error.localizedDescription }
+    }
+
     func monitor(_ owner: CaptureStore) async {
         while !Task.isCancelled, owner.isSetupPresented {
             if !owner.hasActiveCapture && !owner.isBusy {
-                await owner.refreshDevices()
+                await owner.refreshDevices(includeApplications: false)
                 guard !Task.isCancelled, owner.isSetupPresented else { return }
                 await inspect(owner)
             } else if checkCapture?.hasActiveCapture == true {
@@ -176,7 +209,7 @@ final class CaptureSetupStore {
         defer { isTransferringCertificate = false }
         do {
             try await checkCapture.transferSetupCertificate()
-            notice = "Public certificate copied to Android Downloads. In Settings, search Install a certificate, choose CA certificate, then choose the newest mobile-capture-ca file. Complete the phone confirmation and run Verify HTTPS again."
+            notice = "Public certificate copied to Android Downloads. In Settings, search Install a certificate, choose CA certificate, then choose the newest mobile-capture-ca file. Complete the phone confirmation and run Verify HTTPS. If this short check has finished, start a new check after installation."
             error = nil
         } catch { self.error = error.localizedDescription }
     }
@@ -251,6 +284,10 @@ final class CaptureSetupStore {
         owner.logLimitMinutes = Int(ceil(plan.logLimits.maxDurationSeconds / 60))
         // Exact plan budgets are retained separately for the runtime request; visible fields explain them.
         owner.appliedSetupLoggingPolicy = plan.loggingPolicy
+        if let rememberedPlanDefaults {
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            if let data = try? encoder.encode(plan) { rememberedPlanDefaults.set(data, forKey: Self.rememberedPlanKey) }
+        }
         let platformName = plan.platform == .iphone ? "iPhone" : plan.platform.rawValue
         notice = "Capture plan applied. Connect its \(platformName) device and review the requested sources."
         step = .choose
@@ -269,6 +306,7 @@ final class CaptureSetupStore {
     func useManualCapture(_ owner: CaptureStore) {
         guard !owner.hasActiveCapture, !owner.isBusy else { return }
         appliedPlan = nil; owner.appliedSetupLoggingPolicy = nil; owner.setupContext = nil
+        rememberedPlanDefaults?.removeObject(forKey: Self.rememberedPlanKey)
         notice = "Manual capture selected. Review the app and sources before checking."
     }
 
@@ -298,10 +336,14 @@ final class CaptureSetupStore {
     }
 
     func configurationKey(_ owner: CaptureStore) -> String {
-        [owner.selectedDeviceID, owner.targetApp, String(owner.captureLogs), String(owner.captureNetwork),
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let plan = appliedPlan.flatMap { try? encoder.encode($0) }?.base64EncodedString() ?? ""
+        let exactPolicy = owner.appliedSetupLoggingPolicy.flatMap { try? encoder.encode($0) }?.base64EncodedString() ?? ""
+        return [owner.selectedDeviceID, owner.targetApp, String(owner.captureLogs), String(owner.captureNetwork),
          owner.logScopeMode.rawValue, owner.logHelpers, owner.logExecutableOverride, String(owner.logLimitMB),
          String(owner.logLimitRecords), String(owner.logLimitMinutes), owner.networkService,
-         String(owner.trustSimulatorCA), owner.iphoneEndpointHost, appliedPlan?.id ?? "", String(appliedPlan?.version ?? 0)]
+         String(owner.trustSimulatorCA), owner.iphoneEndpointHost, owner.adbPath, owner.mitmdumpPath,
+         owner.outputRoot.path, plan, exactPolicy]
             .joined(separator: "\u{1f}")
     }
 }

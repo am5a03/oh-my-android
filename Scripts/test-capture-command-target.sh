@@ -14,6 +14,7 @@ import Observation
     var isBusy = false
     var hasActiveCapture = false
     var canStart = false
+    var hasSetupReport = false
     var isLoadingTimeline = false
     var isViewPaused = false
     var followLatest = true
@@ -31,6 +32,7 @@ import Observation
     func revealPackage() {}
     func revealCaptureCertificate() {}
     func showSetup() {}
+    func exportSetupReport() async {}
     func togglePauseView() async { isViewPaused.toggle() }
     func setFollowLatest(_ value: Bool) async { followLatest = value }
     func jumpToLatest() async {}

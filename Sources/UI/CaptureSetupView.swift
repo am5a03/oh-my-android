@@ -17,6 +17,12 @@ struct CaptureSetupView: View {
             VStack(alignment: .leading, spacing: 22) {
                 heading
                 progress
+                if let notice = store.externalRequestNotice {
+                    HStack(alignment: .top, spacing: 12) {
+                        message(notice, symbol: "info.circle", color: .secondary)
+                        Button("Dismiss") { store.dismissExternalRequestNotice() }
+                    }
+                }
                 if let error = setup.error { message(error, symbol: "exclamationmark.triangle", color: .red) }
                 if let notice = setup.notice { message(notice, symbol: "info.circle", color: .secondary) }
                 if let error = store.error { message(error, symbol: "exclamationmark.triangle", color: .orange) }
@@ -51,6 +57,9 @@ struct CaptureSetupView: View {
                             if let fingerprint = report.identity.caFingerprint {
                                 LabeledContent("Capture CA") { Text(fingerprint).font(.caption.monospaced()).textSelection(.enabled) }
                             }
+                            Button(setup.isExportingReport ? "Exporting Setup Report…" : "Export Setup Report…", systemImage: "archivebox") {
+                                Task { await setup.exportReadinessReport() }
+                            }.disabled(setup.isExportingReport)
                         }.padding(.top, 12)
                     }
                 }
@@ -66,12 +75,6 @@ struct CaptureSetupView: View {
         .onChange(of: setup.configurationKey(store)) {
             setup.configurationDidChange(store)
             Task { await setup.inspect(store) }
-        }
-        .onChange(of: store.selectedDeviceID) {
-            if let plan = setup.appliedPlan, store.selectedDevice?.platform == plan.platform.rawValue,
-               !store.hasActiveCapture {
-                setup.restoreReviewedAppScope(store)
-            }
         }
     }
 
@@ -117,14 +120,14 @@ struct CaptureSetupView: View {
                         Button("Use Manual Capture") { setup.useManualCapture(store) }
                     } else {
                         Text("Open a plan from your engineer, or choose an app and capture sources below.")
-                        Button("Open Capture Plan…", systemImage: "doc.badge.plus") { setup.importPlan() }
                     }
+                    Button(setup.appliedPlan == nil ? "Open Capture Plan…" : "Open Another Capture Plan…", systemImage: "doc.badge.plus") { setup.importPlan() }
                     if let plan = setup.pendingPlan { planReview(plan) }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
             }
             GroupBox("Device and App") {
                 VStack(alignment: .leading, spacing: 12) {
-                    Picker("Device", selection: $store.selectedDeviceID) {
+                    Picker("Device", selection: Binding(get: { store.selectedDeviceID }, set: { store.selectDeviceForCapture($0) })) {
                         Text("Connect a device, then choose it…").tag("")
                         ForEach(store.devices, id: \.selectionID) { device in
                             Text("\(device.name) · \(device.platformName) · \(device.state)").tag(device.selectionID)
@@ -147,6 +150,8 @@ struct CaptureSetupView: View {
                                 Text(store.selectedApplication?.name ?? store.targetApp).tag(store.targetApp)
                             }
                         }
+                        Button("Refresh Installed Apps", systemImage: "arrow.clockwise") { Task { await store.refreshApplications(); await setup.inspect(store) } }
+                            .disabled(store.isLoadingApplications || store.isBusy)
                         if store.isLoadingApplications { ProgressView().controlSize(.small).accessibilityLabel("Loading installed apps") }
                         if let error = store.applicationDiscoveryError {
                             Text("Apps could not be loaded. \(error)").font(.callout).foregroundStyle(.secondary)
@@ -214,6 +219,8 @@ struct CaptureSetupView: View {
                         Text(check.message)
                         Button("Check Again", systemImage: "arrow.clockwise") { Task { await store.refreshDevices(); await setup.inspect(store) } }
                             .disabled(store.isBusy || setup.isInspecting)
+                        Button("Export Setup Report…", systemImage: "archivebox") { Task { await setup.exportReadinessReport() } }
+                            .disabled(setup.isExportingReport)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
                 }
             }
@@ -224,7 +231,7 @@ struct CaptureSetupView: View {
                         if store.iphoneTunnelConfiguration == nil {
                             Button("Prepare Device", systemImage: "iphone.and.arrow.forward") {
                                 if store.prepareIPhoneSetup() { showTunnelImport = true; Task { await setup.inspect(store) } }
-                            }.disabled(store.isBusy || store.hasActiveCapture)
+                            }.buttonStyle(.borderedProminent).disabled(store.isBusy || store.hasActiveCapture)
                         } else {
                             Label("Saved Capture Profile Available", systemImage: "doc.badge.gearshape").font(.headline)
                             Button(showTunnelImport ? "Hide Tunnel Import" : "Show Tunnel Import", systemImage: "qrcode") { showTunnelImport.toggle() }
@@ -265,7 +272,17 @@ struct CaptureSetupView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(setup.hasLiveCheck ? "Check in Progress" : setup.checkCapture?.session == nil ? "Try a Short Capture" : "Review the Capture Check")
                         .font(.title2.weight(.semibold))
-                    if setup.hasLiveCheck, let check = setup.checkCapture {
+                    if setup.isLaunchingCheck {
+                        ProgressView("Preparing Capture Check…").controlSize(.small)
+                        Text("Wait for the connection to be ready before opening the phone check link.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    } else if setup.hasLiveCheck, let check = setup.checkCapture {
+                        if let started = setup.checkStartedAt, !setup.checkDeadlineReached {
+                            let elapsed = min(45, max(0, Date().timeIntervalSince(started)))
+                            ProgressView(value: elapsed, total: 45).accessibilityLabel("Capture check elapsed time")
+                            Text("\(max(0, 45 - Int(elapsed))) seconds remaining in this short check")
+                                .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                        }
                         if check.session?.platform == "iphone", check.captureNetwork {
                             Label("Turn On Mobile Capture in WireGuard on iPhone", systemImage: "iphone").font(.headline)
                         }
@@ -282,6 +299,10 @@ struct CaptureSetupView: View {
                                 }.disabled(setup.isTransferringCertificate || check.isBusy)
                             }
                             Text(certificateGuidance).font(.callout).foregroundStyle(.secondary)
+                            if let identity = setup.report?.identity.caFingerprint {
+                                Text("Current capture certificate: …\(identity.suffix(12)). The full fingerprint is in Setup Details.")
+                                    .font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
                         }
                         Button(check.session?.needsRoutingRecovery == true ? "Restore Connection & Save Check" : "Stop Check & Save", systemImage: "stop.fill") {
                             Task { await setup.stopCheck(); await setup.inspect(store) }

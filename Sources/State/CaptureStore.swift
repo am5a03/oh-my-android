@@ -53,7 +53,6 @@ final class CaptureStore {
                 logHelpers = ""; logExecutableOverride = ""
                 applications = []
                 loadIPhoneSetup()
-                Task { await refreshApplications() }
             }
         }
     }
@@ -109,13 +108,24 @@ final class CaptureStore {
     @ObservationIgnored private var timelineOperation: Task<Void, Never>?
     @ObservationIgnored private var timelineOperationID = UUID()
 
-    init(hostExecutable: URL? = nil) {
+    init(hostExecutable: URL? = nil, rememberedPlanDefaults: UserDefaults? = nil) {
         self.hostExecutable = hostExecutable
         outputRoot = UserDefaults.standard.string(forKey: "capture.sessionsRoot").map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? CaptureSessionRegistry.defaultRoot
+        if let rememberedPlanDefaults { setup.restoreRememberedPlan(self, defaults: rememberedPlanDefaults) }
     }
 
     var selectedDevice: CaptureDevice? { devices.first { $0.selectionID == selectedDeviceID } }
+    /// Only an explicit device picker action requests installed-app access. Loading saved metadata
+    /// and copying a check's selection must not initiate a phone pairing handshake.
+    func selectDeviceForCapture(_ selectionID: String) {
+        guard !hasActiveCapture else { return }
+        selectedDeviceID = selectionID
+        if let plan = setup.appliedPlan, selectedDevice?.platform == plan.platform.rawValue {
+            setup.restoreReviewedAppScope(self)
+        }
+        Task { [weak self] in await self?.refreshApplications() }
+    }
     var hasOwnActiveCapture: Bool { isStarting || session?.isActive == true || session?.needsRoutingRecovery == true }
     /// A guided check uses the same host and lease, and belongs to this window's lifecycle.
     var hasActiveCapture: Bool { hasOwnActiveCapture || setup.isLaunchingCheck || setup.checkCapture?.hasActiveCapture == true }
@@ -248,7 +258,7 @@ final class CaptureStore {
         } catch { recordFailure(error); return false }
     }
 
-    func refreshDevices() async {
+    func refreshDevices(includeApplications: Bool = true) async {
         guard !isBusy, !hasActiveCapture else { return }
         isBusy = true
         error = nil
@@ -264,7 +274,8 @@ final class CaptureStore {
             if !networkServices.contains(networkService) { networkService = "" }
             if !discovery.warnings.isEmpty { error = discovery.warnings.joined(separator: "\n") }
             loadIPhoneSetup()
-            await refreshApplications()
+            if includeApplications { await refreshApplications() }
+            else if selectedDevice?.isReady != true { applications = [] }
         } catch { recordFailure(error) }
     }
 
@@ -314,6 +325,7 @@ final class CaptureStore {
     /// Opening and inspecting evidence requires no Python process or installed capture tools.
     func loadSession(at directory: URL) async {
         guard !isBusy, !hasActiveCapture else { return }
+        isSetupPresented = false
         isBusy = true
         error = nil
         defer { isBusy = false }
@@ -344,12 +356,16 @@ final class CaptureStore {
 
     func start() async {
         guard canStart, let device = selectedDevice else { return }
-        if setup.appliedPlan != nil { setupContext = setup.recordingContext(self) }
         isBusy = true
         isStarting = true
         error = nil
         defer { isBusy = false; isStarting = false; if session?.isActive != true { logScopeMode = .app } }
         do {
+            if setup.appliedPlan != nil || setupContext?.purpose == .recording {
+                while setup.isInspecting { try await Task.sleep(for: .milliseconds(20)) }
+                await setup.inspect(self)
+                setupContext = setup.recordingContext(self)
+            }
             try FileManager.default.createDirectory(at: outputRoot, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let available = try? outputRoot.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage
             let reserve = captureLogs ? requestedLogPolicy.max_bytes * 4 + 64_000_000 : 256_000_000
@@ -476,7 +492,7 @@ final class CaptureStore {
 
     func stopBeforeQuit() async {
         while setup.isLaunchingCheck { try? await Task.sleep(for: .milliseconds(100)) }
-        if setup.checkCapture?.hasActiveCapture == true { await setup.stopCheck() }
+        if let check = setup.checkCapture, check.hasActiveCapture { await check.stopBeforeQuit() }
         guard setup.checkCapture?.hasActiveCapture != true else { isSetupPresented = true; return }
         while isBusy || isAddingMarker { try? await Task.sleep(for: .milliseconds(100)) }
         await stop()
@@ -508,6 +524,8 @@ final class CaptureStore {
     }
 
     func showSetup() { isSetupPresented = true }
+    var hasSetupReport: Bool { setup.report != nil }
+    func exportSetupReport() async { await setup.exportReadinessReport() }
 
     func addMomentMarker() async {
         if markerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { markerText = "Reproduction moment" }

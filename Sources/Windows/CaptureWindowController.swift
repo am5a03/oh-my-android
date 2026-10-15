@@ -4,7 +4,7 @@ import SwiftUI
 /// Independent capture workspace. Closing the window leaves its session available to reopen.
 @MainActor
 final class CaptureWindowController: NSObject, NSWindowDelegate {
-    let store = CaptureStore()
+    let store = CaptureStore(rememberedPlanDefaults: .standard)
     private lazy var tool = ToolWindow(title: "Mobile Capture", defaultSize: NSSize(width: 1160, height: 840),
         minSize: NSSize(width: 960, height: 680), content: CaptureView(store: store))
 

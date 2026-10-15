@@ -121,4 +121,38 @@ struct CaptureSetupStoreTests {
         store.trustSimulatorCA = true
         #expect(store.setup.configurationKey(store) != limits)
     }
+
+    @Test func `repeat use restores the reviewed task without restoring evidence verification`() throws {
+        let suite = "guided-setup-tests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let original = CaptureStore(rememberedPlanDefaults: defaults)
+        try original.setup.reviewPlan(data: planData)
+        original.setup.applyPendingPlan(original)
+        let restored = CaptureStore(rememberedPlanDefaults: defaults)
+        #expect(restored.setup.appliedPlan == original.setup.appliedPlan)
+        #expect(restored.targetApp == "dev.example.test")
+        #expect(restored.logHelpers == "ExampleHelper")
+        #expect(restored.appliedSetupLoggingPolicy?.max_bytes == 12_345)
+        #expect(restored.selectedDeviceID.isEmpty)
+        #expect(restored.isSetupPresented)
+        #expect(restored.setup.report == nil && restored.setup.checkCapture == nil)
+        #expect(!restored.setup.phoneOriginConfirmed && !restored.hasActiveCapture)
+        let stored = try #require(defaults.data(forKey: "capture.setup.appliedPlan.v1"))
+        #expect(try CapturePlan.decode(stored) == original.setup.appliedPlan)
+        #expect(!String(decoding: stored, as: UTF8.self).contains("probe_nonce"))
+        restored.setup.useManualCapture(restored)
+        #expect(defaults.data(forKey: "capture.setup.appliedPlan.v1") == nil)
+    }
+
+    @Test func `an invalid remembered task does not select sources or start setup verification`() throws {
+        let suite = "guided-setup-invalid-tests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(Data(#"{"schema_version":999}"#.utf8), forKey: "capture.setup.appliedPlan.v1")
+        let restored = CaptureStore(rememberedPlanDefaults: defaults)
+        #expect(restored.setup.appliedPlan == nil)
+        #expect(restored.setup.report == nil)
+        #expect(!restored.captureLogs && !restored.hasActiveCapture)
+    }
 }

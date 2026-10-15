@@ -19,33 +19,33 @@ struct CaptureView: View {
             if store.isSetupPresented {
                 CaptureSetupView(store: store, setup: store.setup)
             } else {
-        GeometryReader { geometry in
-            VStack(spacing: 0) {
-                if let notice = store.externalRequestNotice {
-                    HStack(alignment: .top, spacing: 12) {
-                        Label(notice, systemImage: "info.circle").frame(maxWidth: .infinity, alignment: .leading)
-                        Button("Dismiss") { store.dismissExternalRequestNotice() }
+                GeometryReader { geometry in
+                    VStack(spacing: 0) {
+                        if let notice = store.externalRequestNotice {
+                            HStack(alignment: .top, spacing: 12) {
+                                Label(notice, systemImage: "info.circle").frame(maxWidth: .infinity, alignment: .leading)
+                                Button("Dismiss") { store.dismissExternalRequestNotice() }
+                            }
+                            .font(.callout).padding(12)
+                            Divider()
+                        }
+                        if let session = savedSession {
+                            savedCaptureNotice(session)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { savedNoticeHeight = $0 }
+                            Divider()
+                        }
+                        captureHeader(maximumHeight: headerMaximumHeight(available: geometry.size.height))
+                        Divider()
+                        timeline
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .layoutPriority(1)
+                        Divider()
+                        footer
+                            .fixedSize(horizontal: false, vertical: true)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
                     }
-                    .font(.callout).padding(12)
-                    Divider()
                 }
-                if let session = savedSession {
-                    savedCaptureNotice(session)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { savedNoticeHeight = $0 }
-                    Divider()
-                }
-                captureHeader(maximumHeight: headerMaximumHeight(available: geometry.size.height))
-                Divider()
-                timeline
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .layoutPriority(1)
-                Divider()
-                footer
-                    .fixedSize(horizontal: false, vertical: true)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
-            }
-        }
             }
         }
         .frame(minWidth: 960, minHeight: 680)
@@ -71,25 +71,25 @@ struct CaptureView: View {
                         toolbarLabel("Set Up Capture", symbol: "wand.and.stars")
                     }
                     .help("Choose an app, prepare a device and check the evidence before recording.")
-                }
-                Button { store.exportPackage() } label: {
-                    toolbarLabel("Export ZIP…", symbol: "archivebox")
-                }
-                    .disabled(store.session?.packagePath == nil)
-                    .help(exportHelp)
-                    .accessibilityHint(exportHelp)
-                Menu {
-                    Button("Show ZIP in Finder", systemImage: "folder") { store.revealPackage() }
-                        .disabled(store.session?.packagePath == nil)
-                        .help(store.session?.packagePath == nil ? "Stop and save a capture to create its ZIP." : "Select the saved ZIP in Finder.")
-                    if store.session?.caCertificatePath != nil {
-                        Button("Show Capture Certificate in Finder…", systemImage: "certificate") { store.revealCaptureCertificate() }
-                            .help("Locate the public capture certificate to install on the device. This file contains no private key.")
+                    Button { store.exportPackage() } label: {
+                        toolbarLabel("Export ZIP…", symbol: "archivebox")
                     }
-                } label: {
-                    toolbarLabel("Session", symbol: "ellipsis")
+                        .disabled(store.session?.packagePath == nil)
+                        .help(exportHelp)
+                        .accessibilityHint(exportHelp)
+                    Menu {
+                        Button("Show ZIP in Finder", systemImage: "folder") { store.revealPackage() }
+                            .disabled(store.session?.packagePath == nil)
+                            .help(store.session?.packagePath == nil ? "Stop and save a capture to create its ZIP." : "Select the saved ZIP in Finder.")
+                        if store.session?.caCertificatePath != nil {
+                            Button("Show Capture Certificate in Finder…", systemImage: "certificate") { store.revealCaptureCertificate() }
+                                .help("Locate the public capture certificate to install on the device. This file contains no private key.")
+                        }
+                    } label: {
+                        toolbarLabel("Session", symbol: "ellipsis")
+                    }
+                    .help("Show the saved ZIP or capture certificate in Finder.")
                 }
-                .help("Show the saved ZIP or capture certificate in Finder.")
             }
             ToolbarItem(placement: .status) {
                 if store.isBusy || store.isSaving {
@@ -331,7 +331,7 @@ struct CaptureView: View {
     private var setup: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Picker("Device", selection: $store.selectedDeviceID) {
+                Picker("Device", selection: Binding(get: { store.selectedDeviceID }, set: { store.selectDeviceForCapture($0) })) {
                     Text("Choose a connected device…").tag("")
                     ForEach(store.devices, id: \.selectionID) { device in
                         Text("\(device.name) · \(device.platformName) · \(device.state)").tag(device.selectionID)
