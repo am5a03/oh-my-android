@@ -62,6 +62,8 @@ struct IPhoneCaptureSetupView: View {
                     step(3, title: "Trust the Capture Certificate Once") {
                         Text("With the tunnel on, open **http://mitm.it** in Safari on iPhone and download the **Apple** certificate profile.")
                         Text("Install it in **Settings → General → VPN & Device Management**. Then enable full trust in **Settings → General → About → Certificate Trust Settings**.")
+                        Text("Previously installed certificates can also be named mitmproxy. Enable trust for the certificate you just downloaded through this capture.")
+                            .foregroundStyle(.secondary)
                         Text("This allows the Mac to read HTTPS requests and responses during capture.")
                             .foregroundStyle(.secondary)
                     }

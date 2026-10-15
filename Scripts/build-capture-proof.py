@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import datetime
+import fnmatch
+import hashlib
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -94,25 +98,115 @@ def simulator(destination: Path) -> Path:
              "UIDeviceFamily": [1, 2], "UILaunchScreen": {}}
     with (bundle / "Info.plist").open("wb") as stream:
         plistlib.dump(plist, stream)
-    run("/usr/bin/xcrun", "swiftc", "-swift-version", "6", "-sdk", sdk,
+    run("/usr/bin/xcrun", "--sdk", "iphonesimulator", "swiftc", "-swift-version", "6", "-sdk", sdk,
         "-target", "arm64-apple-ios17.0-simulator", "-parse-as-library",
         ROOT / "Tests/Capture/Fixtures/ios/ProofApp.swift", "-o", bundle / "CaptureProof")
     run("/usr/bin/codesign", "--force", "--sign", "-", bundle)
     return bundle
 
 
+def iphone_signing(args: argparse.Namespace) -> tuple[dict[str, object], str] | None:
+    """Validate existing local development assets; never request signing updates."""
+    if args.unsigned:
+        if any((args.team_id, args.signing_identity, args.provisioning_profile, args.device_id)):
+            raise RuntimeError("--unsigned cannot be combined with signing or device options.")
+        return None
+    if not all((args.team_id, args.signing_identity, args.provisioning_profile, args.device_id)):
+        raise RuntimeError("iPhone signing requires --team-id, --signing-identity, --provisioning-profile and --device-id; --unsigned builds an un-installable SDK proof only.")
+    if not re.fullmatch(r"[A-Fa-f0-9]{40}", args.signing_identity):
+        raise RuntimeError("--signing-identity must be an explicit local Apple Development identity's SHA-1 fingerprint.")
+    profile = subprocess.run(["/usr/bin/security", "cms", "-D", "-i", str(args.provisioning_profile)],
+                             capture_output=True, check=False)
+    if profile.returncode:
+        raise RuntimeError("The selected local provisioning profile could not be decoded.")
+    data = plistlib.loads(profile.stdout)
+    entitlements = data.get("Entitlements", {})
+    app_id = entitlements.get("application-identifier", "")
+    prefix, _, pattern = app_id.partition(".")
+    if not prefix or not fnmatch.fnmatchcase(args.bundle_id, pattern):
+        raise RuntimeError("The local provisioning profile does not permit this neutral proof bundle identifier. Create or supply a matching local profile; this script never contacts the developer portal.")
+    if args.team_id not in data.get("TeamIdentifier", []) or not entitlements.get("get-task-allow"):
+        raise RuntimeError("Supply a development provisioning profile for the explicitly selected team.")
+    expiry = data.get("ExpirationDate")
+    if not isinstance(expiry, datetime.datetime):
+        raise RuntimeError("The selected provisioning profile has no valid expiration date.")
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=datetime.timezone.utc)
+    if expiry <= datetime.datetime.now(datetime.timezone.utc):
+        raise RuntimeError("The selected provisioning profile has expired.")
+    if args.device_id not in data.get("ProvisionedDevices", []):
+        raise RuntimeError("The selected provisioning profile does not include the requested iPhone.")
+    identity = args.signing_identity.upper()
+    fingerprints = {hashlib.sha1(certificate).hexdigest().upper() for certificate in data.get("DeveloperCertificates", [])}
+    if identity not in fingerprints:
+        raise RuntimeError("The selected development identity does not match the local provisioning profile.")
+    identities = output("/usr/bin/security", "find-identity", "-v", "-p", "codesigning")
+    if not any(identity in line and '"Apple Development:' in line for line in identities.splitlines()):
+        raise RuntimeError("The selected Apple Development signing identity is unavailable in the local keychain.")
+    return {"application-identifier": f"{prefix}.{args.bundle_id}",
+            "com.apple.developer.team-identifier": args.team_id, "get-task-allow": True}, identity
+
+
+def iphone(destination: Path, args: argparse.Namespace) -> Path:
+    if not re.fullmatch(r"dev\.mobilecapture\.proof(?:\.[A-Za-z0-9-]+)*", args.bundle_id):
+        raise RuntimeError("Use dev.mobilecapture.proof or a unique suffix under it; company app identifiers are not used for this fixture.")
+    signing = iphone_signing(args)
+    sdk = output("/usr/bin/xcrun", "--sdk", "iphoneos", "--show-sdk-path")
+    bundle = destination / "CaptureProof.app"
+    bundle.mkdir(exist_ok=True)
+    shutil.rmtree(bundle / "_CodeSignature", ignore_errors=True)
+    (bundle / "embedded.mobileprovision").unlink(missing_ok=True)
+    plist = {"CFBundleIdentifier": args.bundle_id, "CFBundleName": "Capture Proof",
+             "CFBundleExecutable": "CaptureProof", "CFBundlePackageType": "APPL",
+             "CFBundleVersion": "1", "CFBundleShortVersionString": "1.0",
+             "MinimumOSVersion": "17.0", "CFBundleSupportedPlatforms": ["iPhoneOS"],
+             "UIDeviceFamily": [1, 2], "UILaunchScreen": {}, "LSRequiresIPhoneOS": True}
+    with (bundle / "Info.plist").open("wb") as stream:
+        plistlib.dump(plist, stream)
+    run("/usr/bin/xcrun", "--sdk", "iphoneos", "swiftc", "-swift-version", "6", "-sdk", sdk,
+        "-target", "arm64-apple-ios17.0", "-parse-as-library",
+        ROOT / "Tests/Capture/Fixtures/ios/ProofApp.swift", "-o", bundle / "CaptureProof")
+    if signing is None:
+        print("Built unsigned iPhoneOS proof fixture; it cannot be installed until signed with a matching local development profile.", file=sys.stderr)
+        return bundle
+    entitlements, identity = signing
+    shutil.copyfile(args.provisioning_profile, bundle / "embedded.mobileprovision")
+    with tempfile.TemporaryDirectory(prefix="capture-proof-signing-") as temp:
+        entitlement_path = Path(temp) / "Proof.entitlements"
+        with entitlement_path.open("wb") as stream:
+            plistlib.dump(entitlements, stream)
+        run("/usr/bin/codesign", "--force", "--sign", identity, "--timestamp=none",
+            "--generate-entitlement-der", "--entitlements", entitlement_path, bundle)
+    run("/usr/bin/codesign", "--verify", "--strict", bundle)
+    return bundle
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("platform", choices=("android", "simulator"))
+    parser.add_argument("platform", choices=("android", "simulator", "iphone"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--ca-cert", type=Path)
     parser.add_argument("--android-sdk", type=Path,
                         default=Path(os.environ.get("ANDROID_HOME", Path.home() / "Library/Android/sdk")))
+    parser.add_argument("--bundle-id", default="dev.mobilecapture.proof", help="Neutral physical-iPhone bundle ID, optionally with a unique suffix.")
+    parser.add_argument("--team-id", help="Explicit existing development team for manual iPhone signing.")
+    parser.add_argument("--signing-identity", help="SHA-1 of an existing local Apple Development identity.")
+    parser.add_argument("--provisioning-profile", type=Path, help="Existing matching development .mobileprovision file.")
+    parser.add_argument("--device-id", help="Physical iPhone UDID already present in the selected profile.")
+    parser.add_argument("--unsigned", action="store_true", help="Build iPhoneOS SDK proof without signing; cannot be installed.")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True, mode=0o700)
     if args.platform == "android" and args.ca_cert is None:
         parser.error("Android requires --ca-cert with the public capture CA.")
-    result = android(args.output, args.ca_cert, args.android_sdk) if args.platform == "android" else simulator(args.output)
+    try:
+        if args.platform == "android":
+            result = android(args.output, args.ca_cert, args.android_sdk)
+        elif args.platform == "simulator":
+            result = simulator(args.output)
+        else:
+            result = iphone(args.output, args)
+    except RuntimeError as error:
+        parser.error(str(error))
     print(result)
 
 

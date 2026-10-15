@@ -3,7 +3,7 @@ import Foundation
 import UIKit
 import os
 
-/// A neutral Simulator fixture. Launch environment supplies only a public URL and proof nonce.
+/// A neutral Simulator or iPhone fixture. Launch environment supplies a public URL and proof nonce.
 @main
 @MainActor
 final class ProofApp: UIResponder, UIApplicationDelegate {
@@ -44,7 +44,12 @@ final class ProofApp: UIResponder, UIApplicationDelegate {
             var request = URLRequest(url: url, timeoutInterval: 25)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: ["capture_proof": nonce, "platform": "simulator"], options: [.sortedKeys])
+            #if targetEnvironment(simulator)
+            let platform = "simulator"
+            #else
+            let platform = "iphone"
+            #endif
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["capture_proof": nonce, "platform": platform], options: [.sortedKeys])
             let (data, response) = try await URLSession.shared.data(for: request)
             let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
             let result = "proof-response nonce=\(nonce) status=\((response as? HTTPURLResponse)?.statusCode ?? 0) bytes=\(data.count) sha256=\(digest)"

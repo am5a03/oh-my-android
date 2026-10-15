@@ -33,6 +33,8 @@ HTTPS setup, open **http://mitm.it** in Safari with the tunnel on, download the
 Apple certificate profile, install it under Settings → General → VPN & Device
 Management, then enable full trust under General → About → Certificate Trust
 Settings. The setup sheet keeps these steps available during recording.
+Previously installed roots can share the name **mitmproxy**; they can be different
+CAs. Enable full trust for the certificate downloaded through this capture.
 
 Turn the phone tunnel **off before Stop & Save**. The Mac asks for confirmation;
 it cannot toggle or independently verify the phone’s VPN state. Until confirmation,
@@ -201,6 +203,71 @@ log hash, timeline references, package checksums and optional native/HAR body pa
 /path/to/mitmproxy-environment/bin/python Scripts/verify-capture-proof.py \
   /absolute/session/capture-package.zip --nonce YOUR-NEUTRAL-NONCE --require-native
 ```
+
+### Physical iPhone proof in Safari
+
+Complete WireGuard and CA trust setup first, then start a fresh, short capture
+with both sources selected. USB OS logs can grow quickly during setup. The Safari
+proof requires no signed app and sends only synthetic Unicode text, a long body
+and a fresh nonce to `https://httpbingo.org/anything`.
+
+Start the proof page on an explicit Mac LAN IPv4 address and port. Its dedicated
+receipt directory must be outside the repository and private to your account:
+
+```sh
+python3 Scripts/serve-iphone-capture-proof.py serve \
+  --host YOUR_MAC_LAN_IP --port 8765 \
+  --directory /private/tmp/iphone-capture-proof \
+  --nonce iphone-safari-FRESH-NONCE
+```
+
+Add a capture marker containing that nonce. With the phone tunnel on, open the
+printed URL in iPhone Safari and tap **Run Capture Proof** once. The page saves
+the exact UTF-8 request and decoded HTTP response bytes, byte counts and SHA-256
+hashes in a local mode-600 receipt. Each nonce permits one attempt; use a fresh
+nonce after a failure. Receipts are capped at 128 KiB, and the server serves only
+the proof page and its receipt routes. It exposes no directory listing or files.
+
+When the page confirms the receipt was saved, turn the phone tunnel off, use
+**Stop & Save**, and confirm the phone state. Stop the proof server with Control-C.
+Verify the saved ZIP and the printed receipt path offline:
+
+```sh
+python3 Scripts/serve-iphone-capture-proof.py verify \
+  --package /absolute/session/capture-package.zip \
+  --receipt /private/tmp/iphone-capture-proof/receipt-iphone-safari-FRESH-NONCE.json \
+  --nonce iphone-safari-FRESH-NONCE
+```
+
+Run the same command with `--require-native` using a Python environment that
+contains mitmproxy to also compare native flow bodies. The verifier checks the
+receipt against HAR and timeline bodies, the phone tunnel's `10.0.0.1` client
+address, parsed USB logs, the nonce marker, raw references and all package
+checksums. Large log/timeline files are streamed. Safari supplies no custom
+application log marker: this proves both evidence sources coexist in one timeline
+and ZIP, with correlation by time remaining inferred. Keep receipts outside Git.
+
+### Manually signed physical iPhone fixture
+
+The native fixture can add an application nonce and response hash to USB logs.
+Building it for a real iPhone requires an existing local **Apple Development**
+identity and an unexpired development provisioning profile that permits the
+neutral bundle ID and already includes that phone's UDID:
+
+```sh
+python3 Scripts/build-capture-proof.py iphone --output /private/tmp/iphone-proof-app \
+  --team-id YOUR_TEAM_ID --signing-identity LOCAL_IDENTITY_SHA1 \
+  --provisioning-profile /absolute/neutral-proof.mobileprovision \
+  --device-id EXACT_IPHONE_UDID --bundle-id dev.mobilecapture.proof
+```
+
+The builder validates those local assets, builds and signs the fixture; it does
+not install or launch it, register devices, create profiles or contact Apple's
+developer portal. Installation and launch require a separately authorized exact
+device and iPhone Developer Mode. Supply `CAPTURE_PROOF_NONCE` and optionally
+`CAPTURE_PROOF_URL` in its launch environment. An explicit `iphone --unsigned`
+build checks the iPhoneOS SDK compilation only and cannot be installed. Use the
+Safari proof when matching local signing assets are unavailable.
 
 Actual observations and limitations are recorded in the
 [live proof report](CAPTURE-PROOF.md). Automated tests use fake
