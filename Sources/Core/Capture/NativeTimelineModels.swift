@@ -47,9 +47,16 @@ struct NativeTimelineSnapshot: Sendable {
 
 enum NativeTimelineRefreshMode: Sendable {
     case complete
-    /// Commit at most 1 MiB per log/network source and 128 KiB of markers while recording.
+    /// Commit at most 1024 records and 1 MiB per log/network source, plus 128 KiB of markers.
+    /// This bound also applies to stopped sessions and imports; drain() finishes the backlog.
     /// Each call returns actor time to queries and marker saves before the next batch.
     case live
+}
+
+struct NativeTimelineProgress: Sendable {
+    let indexedBytes: Int64
+    let totalBytes: Int64
+    let indexedEvents: Int
 }
 
 struct NativeTimelinePage: Sendable {

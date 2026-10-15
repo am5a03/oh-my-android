@@ -203,9 +203,11 @@ struct NativeTimelineTests {
         #expect(rebuilt.counts["network"] == 1 && rebuilt.counts["markers"] == 1)
         #expect(rebuilt.pendingBytes > 0)
 
-        // Stopped refresh ignores the UI budget and exports every byte/record in source-time order.
+        // Stopped UI refresh remains bounded. Explicit drain commits/yields to completion.
         try fixture.state(phase: "stopping")
-        let completed = try await store.refresh(collectorsStopped: true, mode: .live)
+        let stoppedBatch = try await store.refresh(collectorsStopped: true, mode: .live)
+        #expect(stoppedBatch.pendingBytes > 0)
+        let completed = try await store.drain()
         #expect(completed.counts == ["logs": 16_000, "network": 1, "markers": 1])
         #expect(completed.pendingBytes == 0)
         try await fixture.assertParity(store)
@@ -346,6 +348,121 @@ struct NativeTimelineTests {
         try require(replacement.latestSequence > initial.latestSequence, "rebuild never reuses ingress sequence")
     }
 
+    @Test static func compactCachePreservesLegacyFilesAndSeparatesCompanionStatus() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        try fixture.state(phase: "recording")
+        var state = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: fixture.url("session.json"))) as? [String: Any])
+        state["platform"] = "iphone"
+        try fixture.write("session.json", NativeTimelineNormalizer.jsonData(state))
+        try fixture.write("logs/device.log", Data("[connected:fixture]\nOct 15 03:45:00 Proof[12] <Debug>: SDK log retained\n".utf8))
+        try fixture.writeJSONLines("timeline/markers.jsonl", [
+            ["timestamp": "2026-10-15T03:45:01Z", "kind": "capture_status", "summary": "Device logs stopped at limit",
+             "detail": ["origin": "companion", "reason": "byte_limit"]],
+            ["timestamp": "2026-10-15T03:45:02Z", "kind": "marker", "summary": "Tapped ad"]
+        ])
+        let cache = fixture.url("runtime/native-timeline")
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let legacy = Data("Legacy cache may be open in another process; preserve it.".utf8)
+        try fixture.write("runtime/native-timeline/index.sqlite", legacy)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fixture.url("runtime/native-timeline/index.sqlite").path)
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        let snapshot = try await store.drain()
+        #expect(snapshot.counts == ["logs": 2, "network": 0, "markers": 1, "status": 1])
+        #expect(snapshot.observedLogEvents == 1 && snapshot.totalCount == 4)
+        #expect(try Data(contentsOf: fixture.url("runtime/native-timeline/index.sqlite")) == legacy)
+        var query = NativeTimelineQuery(); query.source = "marker"
+        #expect(try await store.query(query).rows.map(\.summary) == ["Tapped ad"])
+        query.source = "status"
+        #expect(try await store.query(query).rows.map(\.kind) == ["capture_status"])
+        let database = try NativeTimelineDatabase(path: NativeTimelineFiles(directory: fixture.root).databasePath())
+        let schema = try #require(try database.text("SELECT sql FROM sqlite_schema WHERE name='events'"))
+        #expect(!schema.contains("event_json") && !schema.contains("search_text") && !schema.contains("detail"))
+        #expect(schema.contains("raw_offset") && schema.contains("raw_length"))
+        let destination = fixture.url("exported.jsonl")
+        try await store.exportTimeline(to: destination)
+        #expect(try Data(contentsOf: destination).split(separator: 10).count == 4)
+    }
+
+    @Test static func retainedIncompleteTailIsExplicitAndDoesNotChangeRawIdentity() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        try fixture.state(phase: "saved")
+        let complete = Data("1792035900.123456  1  2 I Proof: complete record\n".utf8)
+        var tail = Data("1792035901.123456  1  2 I Proof: admitted partial ".utf8)
+        tail.append(contentsOf: [0xe2, 0x82]) // A byte limit can end in the middle of UTF-8.
+        try fixture.write("logs/device.log", complete + tail)
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        let before = try await store.drain()
+        let initial = try await store.query(NativeTimelineQuery())
+        var state = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: fixture.url("session.json"))) as? [String: Any])
+        state["context"] = ["device_logs": ["partial_tail_bytes": tail.count]]
+        state["completeness"] = ["device_logs": ["partial_tail": true]]
+        try fixture.write("session.json", NativeTimelineNormalizer.jsonData(state))
+        let after = try await store.drain()
+        let page = try await store.query(NativeTimelineQuery())
+        #expect(after.generation > before.generation && page.rows.map(\.id) == initial.rows.map(\.id))
+        let destination = fixture.url("exported.jsonl")
+        try await store.exportTimeline(to: destination)
+        let rows = try Data(contentsOf: destination).split(separator: 10).map { try JSONSerialization.jsonObject(with: Data($0)) as! [String: Any] }
+        #expect((rows[0]["detail"] as? [String: Any])?["incomplete"] == nil)
+        let partial = try #require(rows[1]["detail"] as? [String: Any])
+        #expect(partial["incomplete"] as? Bool == true)
+        #expect((partial["incomplete_reason"] as? String)?.contains("admitted bytes are preserved") == true)
+        #expect(rows[1]["raw_ref"] as? String == "logs/device.log#L2")
+        #expect(try Data(contentsOf: fixture.url("logs/device.log")) == complete + tail)
+    }
+
+    @Test static func cancelledDrainResumesCommittedBatchesAndMarkerBacklogAcknowledgesOwnMarker() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        try fixture.state(phase: "recording")
+        try fixture.write("logs/device.log", Data(String(repeating: "1792035900.123456  1  2 I Proof: retained synthetic record\n", count: 20_000).utf8))
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        let (stream, continuation) = AsyncStream<NativeTimelineProgress>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let operation = Task { try await store.drain { continuation.yield($0) } }
+        for await progress in stream where progress.indexedEvents >= 2_048 {
+            #expect(progress.indexedBytes > 0 && progress.indexedBytes < progress.totalBytes)
+            operation.cancel()
+            break
+        }
+        continuation.finish()
+        await #expect(throws: CancellationError.self) { try await operation.value }
+        let checkpoint = try await store.query(NativeTimelineQuery())
+        #expect(checkpoint.matchingCount >= 2_048 && checkpoint.matchingCount < 20_000)
+        try fixture.writeJSONLines("timeline/markers.jsonl", (0..<1_100).map {
+            ["timestamp": "2026-10-15T03:45:02Z", "kind": "marker", "summary": "Older marker \($0)"]
+        })
+        let marker = try await store.appendMarker(text: "Acknowledgment belongs to this marker")
+        #expect(marker.summary == "Acknowledgment belongs to this marker")
+        #expect(marker.rawRef == "timeline/markers.jsonl#L1101")
+        let resumed = try await store.drain()
+        #expect(resumed.totalCount == 21_101 && resumed.pendingBytes == 0)
+        #expect(resumed.latestSequence > checkpoint.latestSequence)
+        try await fixture.assertParity(store)
+    }
+
+    @Test static func exactSearchCacheIsBoundedIncrementalAndCancellable() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        try fixture.state(phase: "recording")
+        try fixture.write("logs/device.log", Data(String(repeating: "1792035900.123456  1  2 I Ads: café Straße https://example.invalid/a?b=c&d=1\n", count: 3_000).utf8))
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        _ = try await store.drain()
+        for text in ["cafe\u{301}", "STRASSE", "a?b=c&d=1"] {
+            var query = NativeTimelineQuery(); query.search = text
+            #expect(try await store.query(query).matchingCount == 3_000)
+        }
+        let database = try NativeTimelineDatabase(path: NativeTimelineFiles(directory: fixture.root).databasePath())
+        #expect(try database.scalar("SELECT COUNT(*) FROM search_progress") <= 2)
+        #expect(try database.scalar("SELECT COUNT(*) FROM search_matches") <= 6_000)
+        try fixture.append("logs/device.log", Data("1792035900.123456  1  2 I Ads: STRASSE new record\n".utf8))
+        _ = try await store.drain()
+        var query = NativeTimelineQuery(); query.search = "strasse"
+        #expect(try await store.query(query).matchingCount == 3_001)
+        let cancelledQuery = query
+        let operation = Task { try await store.query(cancelledQuery) }
+        operation.cancel()
+        await #expect(throws: CancellationError.self) { try await operation.value }
+        #expect(try await store.query(query).matchingCount == 3_001)
+    }
+
     static func safetyChecks() async throws {
         let fixture = try Fixture(); defer { fixture.remove() }
         try fixture.state(phase: "saved")
@@ -378,18 +495,42 @@ struct NativeTimelineTests {
         let file = fixture.url("logs/device.log")
         FileManager.default.createFile(atPath: file.path, contents: nil)
         let output = try FileHandle(forWritingTo: file)
-        for batch in 0..<100 {
+        for batch in 0..<250 {
             var data = Data()
-            for item in 0..<10_000 { data.append(Data("1792035999.000001  1  2 I Bench: event \(batch * 10_000 + item)\n".utf8)) }
+            for item in 0..<1_000 {
+                let prefix = "1792035999.000001  1  2 I Bench: event \(batch * 1_000 + item) "
+                data.append(Data((prefix + String(repeating: "x", count: 419 - prefix.utf8.count) + "\n").utf8))
+            }
             try output.write(contentsOf: data)
         }
         try output.close()
+        let body = "café response payload 🧭 " + String(repeating: "small full network body ", count: 40)
+        try fixture.writeJSONLines("network/events.jsonl", [
+            ["timestamp": "2026-10-15T03:45:00Z", "kind": "request", "summary": "POST https://example.invalid/proof"],
+            ["timestamp": "2026-10-15T03:45:01Z", "kind": "response", "summary": "200 proof response",
+             "detail": ["response_body": ["encoding": "utf-8", "text": body, "bytes": body.utf8.count]]]
+        ])
         let store = try NativeTimelineStore(sessionDirectory: fixture.root)
         let clock = ContinuousClock(), start = clock.now
-        let imported = try await store.refresh(), importDuration = start.duration(to: clock.now)
+        let (stream, continuation) = AsyncStream<NativeTimelineProgress>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let importing = Task { defer { continuation.finish() }; return try await store.drain { continuation.yield($0) } }
+        var queryMilliseconds: [Double] = [], markerMilliseconds: [Double] = []
+        var lastSample = 0
+        for await progress in stream where progress.indexedEvents >= lastSample + 10_000 && markerMilliseconds.count < 20 {
+            lastSample = progress.indexedEvents
+            var query = NativeTimelineQuery(); query.source = markerMilliseconds.count.isMultiple(of: 2) ? "logs" : "network"
+            let queryStart = clock.now
+            let page = try await store.query(query)
+            queryMilliseconds.append(milliseconds(queryStart.duration(to: clock.now)))
+            #expect(!page.rows.isEmpty)
+            let markerStart = clock.now
+            _ = try await store.appendMarker(text: "Benchmark action \(markerMilliseconds.count)")
+            markerMilliseconds.append(milliseconds(markerStart.duration(to: clock.now)))
+        }
+        let imported = try await importing.value, importDuration = start.duration(to: clock.now)
         let queryStart = clock.now
         let page = try await store.query(NativeTimelineQuery())
-        let queryDuration = queryStart.duration(to: clock.now)
+        let latestDuration = queryStart.duration(to: clock.now)
         let refreshStart = clock.now
         _ = try await store.refresh()
         let unchangedDuration = refreshStart.duration(to: clock.now)
@@ -397,24 +538,44 @@ struct NativeTimelineTests {
         let appendStart = clock.now
         let appended = try await store.refresh()
         let appendedDuration = appendStart.duration(to: clock.now)
-        var search = NativeTimelineQuery(); search.search = "event 123456"
+        var search = NativeTimelineQuery(); search.search = "event 123456 "
         let searchStart = clock.now
         let matched = try await store.query(search)
         let searchDuration = searchStart.duration(to: clock.now)
-        let cancelQuery = search
+        let cachedStart = clock.now
+        _ = try await store.query(search)
+        let cachedDuration = cachedStart.duration(to: clock.now)
+        var coldQuery = NativeTimelineQuery(); coldQuery.search = "never-present-new-cold-query"
+        let cancelQuery = coldQuery
         let cancelledSearch = Task { try await store.query(cancelQuery) }
         try await Task.sleep(for: .milliseconds(10))
         let cancelStart = clock.now
         cancelledSearch.cancel()
         await #expect(throws: CancellationError.self) { try await cancelledSearch.value }
         let cancelDuration = cancelStart.duration(to: clock.now)
-        try require(try await store.query(NativeTimelineQuery()).rows.count == 400, "cancelled million-row search leaves index usable")
-        var usage = rusage()
-        getrusage(RUSAGE_SELF, &usage)
-        try require(imported.totalCount == 1_000_000 && page.rows.count == 400, "million-event bounded page")
-        try require(appended.totalCount == 1_001_000 && matched.matchingCount == 1, "million-event append and search")
-        print("1M events: import \(importDuration), latest page \(queryDuration), unchanged refresh \(unchangedDuration), +1000 refresh \(appendedDuration), substring search \(searchDuration), search cancellation \(cancelDuration), peak RSS \(Double(usage.ru_maxrss) / 1_048_576) MiB; 400 lightweight rows returned.")
+        try fixture.state(phase: "saved")
+        let saveStart = clock.now
+        let saved = try await store.drain()
+        let destination = fixture.url("exported.jsonl")
+        try await store.exportTimeline(to: destination)
+        let saveDuration = saveStart.duration(to: clock.now)
+        let cacheBytes = try fixture.cacheBytes()
+        let rawBytes = try FileManager.default.attributesOfItem(atPath: file.path)[.size] as! Int64
+        let queryP95 = percentile95(queryMilliseconds), markerP95 = percentile95(markerMilliseconds)
+        #expect(imported.totalCount == 250_002 + markerMilliseconds.count && page.rows.count == 400)
+        #expect(appended.totalCount == 251_002 + markerMilliseconds.count && matched.matchingCount == 1)
+        #expect(saved.pendingBytes == 0 && saved.totalCount == appended.totalCount)
+        #expect(cacheBytes <= rawBytes * 2 + 64 * 1_048_576)
+        #expect(queryP95 < 500 && markerP95 < 500)
+        var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
+        print("250k / \(Double(rawBytes) / 1_048_576) MiB raw: import \(importDuration), ordinary query p95 \(queryP95) ms, marker p95 \(markerP95) ms (\(markerMilliseconds.count) samples), latest page \(latestDuration), unchanged refresh \(unchangedDuration), +1000 refresh \(appendedDuration), cold exact search \(searchDuration), cached exact search \(cachedDuration), search cancellation \(cancelDuration), stopped drain + normalized export \(saveDuration), cache \(Double(cacheBytes) / 1_048_576) MiB, peak RSS \(Double(usage.ru_maxrss) / 1_048_576) MiB.")
     }
+
+    static func milliseconds(_ value: Duration) -> Double {
+        let components = value.components
+        return Double(components.seconds) * 1_000 + Double(components.attoseconds) / 1_000_000_000_000_000
+    }
+    static func percentile95(_ values: [Double]) -> Double { values.sorted()[max(0, Int(ceil(Double(values.count) * 0.95)) - 1)] }
 
     struct TestFailure: Error { let message: String; init(_ message: String) { self.message = message } }
     static func require(_ condition: Bool, _ message: String) throws { if !condition { throw TestFailure(message) } }
@@ -430,6 +591,11 @@ struct NativeTimelineTests {
             }
         }
         func remove() { try? FileManager.default.removeItem(at: root) }
+        func cacheBytes() throws -> Int64 {
+            let cache = url("runtime/native-timeline")
+            let entries = try FileManager.default.contentsOfDirectory(at: cache, includingPropertiesForKeys: [.fileSizeKey])
+            return try entries.reduce(0) { total, entry in total + Int64(try entry.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) }
+        }
         func url(_ relative: String) -> URL { root.appendingPathComponent(relative) }
         func write(_ relative: String, _ data: Data) throws { try data.write(to: url(relative), options: .atomic) }
         func append(_ relative: String, _ data: Data) throws {

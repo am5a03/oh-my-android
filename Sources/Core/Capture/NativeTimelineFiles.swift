@@ -82,7 +82,10 @@ final class NativeTimelineFiles: @unchecked Sendable {
     }
 
     func databasePath() throws -> String {
-        let fd = openat(cache.descriptor, "index.sqlite", O_RDWR | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0o600)
+        // A new schema gets a new filename. Never migrate, unlink or rename a legacy
+        // database that another process may still have open.
+        let name = "compact-v3.sqlite"
+        let fd = openat(cache.descriptor, name, O_RDWR | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw Self.failure("Open private timeline index") }
         let file = NativeTimelineFile(fd), info = try file.information()
         guard info.st_mode & S_IFMT == S_IFREG, info.st_uid == getuid(), info.st_mode & 0o077 == 0 else {
@@ -91,7 +94,7 @@ final class NativeTimelineFiles: @unchecked Sendable {
         // SQLite's VFS cannot open children of /dev/fd on macOS. Resolve the already-open
         // private directory with F_GETPATH, never by following user-supplied symlink paths.
         // The database is precreated 600 and SQLite also opens it with NOFOLLOW.
-        for name in ["index.sqlite-journal", "index.sqlite-wal", "index.sqlite-shm"] {
+        for name in [name + "-journal", name + "-wal", name + "-shm"] {
             var status = stat()
             if fstatat(cache.descriptor, name, &status, AT_SYMLINK_NOFOLLOW) == 0,
                status.st_mode & S_IFMT != S_IFREG || status.st_uid != getuid() || status.st_mode & 0o077 != 0 {
@@ -100,7 +103,7 @@ final class NativeTimelineFiles: @unchecked Sendable {
         }
         var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
         guard fcntl(cache.descriptor, F_GETPATH, &path) == 0 else { throw Self.failure("Resolve private timeline cache") }
-        return String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self) + "/index.sqlite"
+        return String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self) + "/" + name
     }
 
     func appendMarker(_ data: Data) throws {

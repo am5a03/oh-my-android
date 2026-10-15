@@ -16,7 +16,7 @@ enum NativeTimelineNormalizer {
         text.precomposedStringWithCanonicalMapping.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
     }
 
-    static func normalize(source: String, path: String, line: Int64, raw: Data, state: [String: Any], iPhoneSessionStartedAt: Date? = nil) throws -> [String: Any] {
+    static func normalize(source: String, path: String, line: Int64, raw: Data, state: [String: Any], iPhoneSessionStartedAt: Date? = nil, incompleteTail: Bool = false) throws -> [String: Any] {
         func iPhoneLogValue() -> [String: Any]? {
             if let iPhoneSessionStartedAt { return IPhoneLogFormat.parse(raw, sessionStartedAt: iPhoneSessionStartedAt) }
             return IPhoneLogFormat.parse(raw, sessionStartedAt: state["started_at"] as? String ?? "")
@@ -62,6 +62,10 @@ enum NativeTimelineNormalizer {
             parsed = timestamp(state["started_at"]) ?? 0
             basis = parsed == 0 ? "unavailable_epoch_sentinel" : "session_start_fallback"
             uncertainty = nil; calibrated = false
+        }
+        if incompleteTail {
+            detail["incomplete"] = true
+            detail["incomplete_reason"] = "The collector stopped after retaining part of the final raw record; its admitted bytes are preserved."
         }
         detail["clock_calibrated"] = calibrated
         detail["timestamp_basis"] = basis
