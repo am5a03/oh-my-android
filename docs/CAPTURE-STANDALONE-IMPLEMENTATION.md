@@ -22,3 +22,28 @@ full-session filters, markers, paging, held view and lazy body details. All comp
 with Swift 6 and warnings as errors. The embedded Oh My Android app and helpers
 also built successfully in an isolated DerivedData directory. No connected-device
 or UI test was run.
+
+## Checkpoint 2: independent application
+
+- Added a real `MobileCapture` app target, `Mobile Capture.app`, with its own
+  0.1.0 development version, native Dock/app/Window menus, Settings window,
+  reopen behavior and capture-aware quit policy. It embeds its own host/proxy and
+  runtime resources; it does not link AppModel, Android features, Sparkle or the
+  original Android MCP. The old embedded capture remains until checkpoint 3.
+- Added a bounded serial cold/warm URL handoff router. Context only preselects an
+  exact ready device and verified installed app; it never starts a recording.
+  An existing inspected/active session is retained with an inline request notice.
+- Added a read-only session-ID catalog of known session roots. Existing evidence
+  stays in place. Links reject unknown/duplicate IDs, symlinked children/metadata,
+  recorded-location mismatches and newer coordinator versions. This is not the
+  later durable MCP operation registry.
+- The chosen session folder is stored in this app's own preferences domain. CA,
+  iPhone profile and global routing-lease paths are unchanged.
+
+Validation: the standalone app and its helpers build with Swift 6 warnings as
+errors in separate DerivedData. Handoff fixtures and six unsafe/ambiguous catalog
+lookups pass. Capture-store fixtures cover preservation of both active and saved
+sessions under incoming context. GUI launching, app reopening, OS authorization
+and connected-device checks remain deferred; compilation alone does not prove
+those interactions. A dedicated final app icon and owner-controlled release
+identity remain release work.

@@ -25,6 +25,34 @@ struct CaptureHandoffTests {
         }
         let oversized = "mobilecapture://open?v=1&platform=android&device=" + String(repeating: "x", count: 5000)
         do { _ = try CaptureHandoff(url: URL(string: oversized)!); fatalError("Accepted oversized handoff") } catch {}
+        try registryChecks()
         print("Capture handoff: 3 round trips and 19 invalid-input checks passed")
+    }
+    static func registryChecks() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("capture-registry-test-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let known = root.appendingPathComponent("known"), outside = root.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: known, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        func session(_ directory: URL, id: String, stored: URL? = nil, version: Int = 1) throws {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: ["id": id, "directory": (stored ?? directory).path, "coordinator_version": version])
+            try data.write(to: directory.appendingPathComponent("session.json"))
+        }
+        let legacy = known.appendingPathComponent("20261015-120000-abc123")
+        try session(legacy, id: "known-id")
+        let registry = CaptureSessionRegistry(roots: [known, known])
+        let resolved = try registry.resolve(id: "known-id")
+        precondition(resolved.standardizedFileURL.path == legacy.standardizedFileURL.resolvingSymlinksInPath().path)
+        try session(outside.appendingPathComponent("hidden"), id: "outside-id")
+        try FileManager.default.createSymbolicLink(at: known.appendingPathComponent("symlink"), withDestinationURL: outside.appendingPathComponent("hidden"))
+        try session(known.appendingPathComponent("wrong"), id: "wrong-id", stored: outside)
+        try session(known.appendingPathComponent("newer"), id: "newer-id", version: 99)
+        for id in ["unknown", "outside-id", "wrong-id", "newer-id", "../outside/hidden"] {
+            do { _ = try registry.resolve(id: id); fatalError("Resolved an untrusted/unknown session") } catch {}
+        }
+        try session(known.appendingPathComponent("duplicate"), id: "known-id")
+        do { _ = try registry.resolve(id: "known-id"); fatalError("Resolved ambiguous session") } catch {}
+        print("Session registry: existing-session lookup and 6 unsafe/ambiguous lookup checks passed")
     }
 }

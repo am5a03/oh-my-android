@@ -136,6 +136,12 @@ struct CaptureTimelineTests {
         let store = CaptureStore()
         await store.loadSession(at: directory)
         try require(store.pendingTimelineBytes > 0 && store.session?.counts["network"] == 1, "network is indexed while device logs catch up")
+        let heldSelection = store.selectedDeviceID
+        await store.applyExternalSelection(platform: "iphone", deviceID: "other-device", applicationID: "com.example.other")
+        try require(store.selectedDeviceID == heldSelection && store.session?.id == "backlog-test" && store.externalRequestNotice != nil,
+                    "external context preserves an active capture without device discovery or routing")
+        store.dismissExternalRequestNotice()
+        try require(store.externalRequestNotice == nil, "external request notice can be dismissed")
         try require(store.timelineCountText.contains("Indexing saved evidence"), "backlog is visible instead of claiming a complete captured count")
         store.markerText = "Tapped during log backlog"
         let clicked = Date()
@@ -159,6 +165,10 @@ struct CaptureTimelineTests {
         let imported = CaptureStore()
         await imported.loadSession(at: directory)
         try require(imported.pendingTimelineBytes > 0, "saved-session imports remain bounded")
+        let inspectedSelection = imported.selectedDeviceID
+        await imported.applyExternalSelection(platform: "android", deviceID: "different-device", applicationID: nil)
+        try require(imported.selectedDeviceID == inspectedSelection && imported.session?.id == "backlog-test",
+                    "external context preserves an inspected saved session")
         imported.toggleBackgroundIndexing()
         try require(imported.isIndexingPaused, "saved-session indexing can be paused")
         let retainedCount = imported.timeline?.totalCount

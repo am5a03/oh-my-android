@@ -17,6 +17,14 @@ struct CaptureView: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
+                if let notice = store.externalRequestNotice {
+                    HStack(alignment: .top, spacing: 12) {
+                        Label(notice, systemImage: "info.circle").frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Dismiss") { store.dismissExternalRequestNotice() }
+                    }
+                    .font(.callout).padding(12)
+                    Divider()
+                }
                 if let session = savedSession {
                     savedCaptureNotice(session)
                         .fixedSize(horizontal: false, vertical: true)

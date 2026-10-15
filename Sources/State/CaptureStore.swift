@@ -21,6 +21,7 @@ final class CaptureStore {
     private(set) var isAddingMarker = false
     private(set) var didDiscover = false
     private(set) var error: String?
+    private(set) var externalRequestNotice: String?
     private(set) var isViewPaused = false
     private(set) var hiddenThroughSequence: Int64?
     private(set) var jumpToLatestToken: UInt64 = 0
@@ -103,8 +104,8 @@ final class CaptureStore {
 
     init(hostExecutable: URL? = nil) {
         self.hostExecutable = hostExecutable
-        outputRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MobileCapture/Sessions", isDirectory: true)
+        outputRoot = UserDefaults.standard.string(forKey: "capture.sessionsRoot").map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? CaptureSessionRegistry.defaultRoot
     }
 
     var selectedDevice: CaptureDevice? { devices.first { $0.selectionID == selectedDeviceID } }
@@ -245,6 +246,36 @@ final class CaptureStore {
             loadIPhoneSetup()
             await refreshApplications()
         } catch { recordFailure(error) }
+    }
+
+    func showExternalRequestNotice(_ message: String) { externalRequestNotice = message }
+    func dismissExternalRequestNotice() { externalRequestNotice = nil }
+
+    /// External context is a suggestion. Never replace a recording, inspected session or unavailable target.
+    func applyExternalSelection(platform: String, deviceID: String, applicationID: String?) async {
+        guard session == nil, !hasActiveCapture, !isBusy else {
+            externalRequestNotice = "A companion requested \(applicationID ?? platform) on device \(deviceID). Your current session and selection remain open."
+            return
+        }
+        selectedDeviceID = ""
+        await refreshDevices()
+        guard !isBusy, !hasActiveCapture, session == nil else { return }
+        guard let device = devices.first(where: { $0.platform == platform && $0.id == deviceID }), device.isReady else {
+            externalRequestNotice = "The requested device \(deviceID) is unavailable. Connect it, then select it here. No other device was selected."
+            return
+        }
+        selectedDeviceID = device.selectionID
+        await refreshApplications()
+        guard selectedDeviceID == device.selectionID, session == nil, !hasActiveCapture else { return }
+        if let applicationID {
+            if applications.contains(where: { $0.id == applicationID }) { targetApp = applicationID }
+            else {
+                targetApp = ""
+                externalRequestNotice = "The requested app \(applicationID) could not be found on this device. Choose an installed app before recording logs."
+                return
+            }
+        }
+        externalRequestNotice = "Device context received. Review the capture sources and app, then choose Start Capture when ready."
     }
 
     func openSession() async {
@@ -429,7 +460,10 @@ final class CaptureStore {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.message = "Choose a local folder for capture sessions. Full request bodies and logs may contain private data."
-        if panel.runModal() == .OK, let url = panel.url { outputRoot = url }
+        if panel.runModal() == .OK, let url = panel.url {
+            outputRoot = url
+            UserDefaults.standard.set(url.path, forKey: "capture.sessionsRoot")
+        }
     }
 
     func revealPackage() {
