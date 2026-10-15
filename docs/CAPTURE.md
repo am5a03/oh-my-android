@@ -3,8 +3,10 @@
 Tracks [issue #4](https://github.com/am5a03/oh-my-android/issues/4).
 
 The **Capture Network & Logs…** menu opens a separate capture window for an Android
-device/emulator, a paired physical iPhone, or a booted iOS Simulator. Select the device, choose device logs
-and/or network requests, and click **Start Capture**. Use the device, add markers
+device/emulator, a paired physical iPhone, or a booted iOS Simulator. Select the device,
+choose network requests and/or device logs, and click **Start Capture**. When enabling
+logs, choose an installed application first. Logs are off initially, so network-only
+capture and certificate setup do not collect unrelated device activity. Use the device, add markers
 for reproduction steps, then click **Stop & Save**. The result is one ZIP and a
 shared timeline linking log messages and network events to original evidence.
 
@@ -22,17 +24,23 @@ success confirmation.
 This implementation has no company repositories, accounts, endpoint lists, app
 identifiers or analyzers as dependencies. Physical iPhone USB logs use
 libimobiledevice (`brew install libimobiledevice`) and an unlocked phone that
-trusts this Mac. The optional app identifier remains investigation context;
-the USB stream retains logs across processes and app restarts.
+trusts this Mac. App scope uses verified executable names across PID changes.
+If installed metadata cannot resolve an executable, an engineer must provide its
+exact name under **Advanced Logging**; display names are never guessed.
 
-The current iPhone collector records all device processes without a size or time
-limit. Timeline filters affect the display only. Keep device logs off during
-tunnel/certificate setup and use short recordings for reproductions; an unfiltered
-setup run produced 1.8 GB of raw logs in about 15 minutes, with a much larger
-temporary index and a prolonged save. App-scoped capture, explicit recording limits
-and a compact index remain necessary before an AdOps release.
-The [cross-platform logging plan](CAPTURE-LOGGING-PLAN.md) defines those implementation
-checkpoints and proposed defaults for Android, iPhone and Simulator.
+Logs stop at the first configured limit: **200 MB, 250,000 nonblank raw lines or
+10 minutes** by default. Warnings start at 100 MB, 200,000 lines or 8 minutes.
+Advanced Logging accepts smaller limits and explicitly identified related processes.
+Whole-device logging is an advanced choice for the next recording only. It uses
+the same limits. No admitted log history is rolled away or sampled.
+
+A log limit stops only the log collector. Network requests and full bodies keep
+recording until **Stop & Save**; an inline notice and companion timeline event
+identify the log coverage end. A log-only capture saves automatically at its limit.
+Raw evidence, network files, timeline cache and indexing backlog have separate
+volume indicators. Network bodies and ZIP staging can exceed the log budget;
+available disk space is shown separately. See the [logging plan and verification
+status](CAPTURE-LOGGING-PLAN.md) before treating the new app scope as hardware-validated.
 
 For physical iPhone network capture, select the phone and choose **Set Up iPhone
 Capture…**. Keep the phone and Mac on the same reachable Wi-Fi network. Scan the
@@ -117,18 +125,26 @@ be owned by the current user with mode 700. Do not share the private-key file.
 [Mitmproxy's CA documentation](https://docs.mitmproxy.org/stable/concepts/certificates/)
 describes its certificate and key format.
 
-On Simulator, the optional target-app bundle identifier resolves an installed
-app's executable and limits logs to that process, including SDK logs emitted by
-it across restarts. Separate helper and extension processes are outside that
-scope. Leaving the field empty captures all Simulator processes at debug level
-and can produce substantial volume. The exported context records the exact scope.
-On Android, the field records investigation context and raw logs retain all
-processes. Use the timeline's text/source filters for inspection. Filters search
+Android resolves the active user's package UID, probes UID-filter support and
+monitors installation identity. Where UID filtering is unavailable, Swift admits
+only records with verified process lifetimes before persistence. Shared UIDs and
+unreadable identity metadata fail with an explanation; scope never silently expands.
+Isolated SDK processes are excluded unless their ownership can be verified.
+iPhone and Simulator use verified executable names and resolved/explicit helpers
+across relaunches. Shared executable names require an explicit engineer override;
+including shared processes can include unrelated activity. The package records
+the exact scope and exclusions. Removed or OS-redacted debug messages cannot be recovered.
+
+Use the timeline's text/source filters for inspection. Filters search
 the full session, including request/response details and bodies, and initially
 load the newest 400 matches. The native timeline indexes evidence on disk and
 keeps at most 1,200 lightweight previews in the panel; selected full details are
 loaded separately. Use the older/newer controls to page through the complete
-session. Reading or scrolling turns off **Follow Latest**, preserving the current
+session. A large saved session indexes in bounded background batches. **Pause
+Indexing** stops that work without deleting evidence; resume it to search the
+remaining records. Cold text searches scan original records and may take longer
+than source-only paging; changing the query cancels obsolete search work.
+Reading or scrolling turns off **Follow Latest**, preserving the current
 rows and reading position while capture continues. **Jump to Latest** moves once;
 **Follow Latest** keeps following. Changing the display order never enables following.
 
@@ -142,9 +158,10 @@ paused view hide it.
 
 The count distinguishes shown rows, matching events and total captured events.
 Requests and responses are separate
-events, so event counts are not a count of HTTP transactions. There is no automatic
-event-count retention limit on the raw session or ZIP; available disk space limits
-capture size. Network traffic
+events, so event counts are not a count of HTTP transactions. Companion
+**Capture Status** events have a separate filter and do not count as user markers.
+All admitted evidence remains in the raw session and ZIP; log budgets stop further
+collection instead of deleting old events. Network traffic
 is not automatically attributed to one app. An app that emits no useful diagnostic
 messages cannot be made verbose by this tool.
 
@@ -164,6 +181,13 @@ the recovery journal and an actionable error rather than overwriting another
 change. Preserve the session directory until recovery completes. Open an existing
 session from the capture window after relaunch to inspect it or retry Stop. Quitting
 the app waits for active capture cleanup and is cancelled if recovery remains.
+
+Saving reports restoration, collector shutdown, timeline completion, validation
+and ZIP creation. **Cancel Save** becomes available only after routing is restored
+and collector shutdown is verified. It cancels indexing/packaging, keeps original
+evidence and any previous ZIP, and releases the capture lease. Use **Retry Save**
+to finish the same session later. An accepted cancellation is checked again before
+the new ZIP is published. No process IDs or terminal kill commands are needed.
 
 ## Neutral live proof fixtures
 

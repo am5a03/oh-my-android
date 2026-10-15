@@ -70,7 +70,7 @@ temporary file and atomically replaces the final ZIP only on success.
 | `phase`, `sources`, `warnings`, `errors` | Supplied lifecycle outcome and collector failures |
 | `routing_restored` | Supplied restoration result; exporting does not override it |
 | `package_state` | `complete` or `partial`, including evidence checks below |
-| `counts` | Full normalized event counts: `logs`, `network`, `markers` |
+| `counts` | Full normalized event counts: `logs`, `network`, `markers`; additive `status` counts companion status events |
 | `network_diagnostics` | Decoded HTTP events, TLS failures, certificate rejections and request errors |
 | `clock_calibration` | Offset, uncertainty, and method for each source |
 | `completeness` | Original completion details plus generated evidence findings |
@@ -101,6 +101,15 @@ apparent absence of requests.
 `context.json` provides the portable session/device fields and any supplied
 public app/build/tool metadata and reproduction context. It does not introduce
 app-specific interpretation or invent version information.
+
+New native sessions include `context.log_scope` (resolved app/process identities,
+match basis and exclusions) and `context.device_logs` (policy, persisted byte/raw
+record counts, coverage times, completion reason, incomplete tail and any excluded
+unverified bytes). `completeness.device_logs` explicitly reports early coverage
+end and partial tail. A log cap ends admission rather than evicting earlier records;
+continuing network after that point is a coverage gap. Companion `capture_status`
+events have `source: marker` and `detail.origin: companion`, with their own `status`
+count and UI filter. They never increase the user `markers` count.
 
 ## Shared timeline
 

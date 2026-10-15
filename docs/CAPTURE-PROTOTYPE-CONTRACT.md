@@ -1,5 +1,10 @@
 # Capture prototype contract
 
+This is the original Python prototype contract, retained for legacy compatibility.
+The current app uses the [native Swift runtime](CAPTURE-NATIVE-RUNTIME.md), including
+physical iPhone support, required explicit log scope and bounded logging. Refer to
+that document and the [logging plan/status](CAPTURE-LOGGING-PLAN.md) for new captures.
+
 Tracks https://github.com/am5a03/oh-my-android/issues/4. Phase 1 supports Android
 devices/emulators and booted iOS Simulators. Physical iPhone is phase 2.
 

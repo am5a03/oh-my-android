@@ -1,5 +1,79 @@
 # Mobile capture logging plan
 
+## Implementation status · 15 October 2026
+
+The Swift implementation now includes bounded pre-persistence log admission,
+installed-app scope resolution, compact raw-reference indexing and logging/save
+controls. Device logs start unchecked. Selecting whole-device logging is an
+explicit choice for one recording. Companion status events have their own count
+and filter; network bodies retain the existing full-body path.
+
+Synthetic automated checks run tonight. **Physical Android, physical iPhone,
+iOS Simulator and visual/keyboard checks are deferred to the next testing session.**
+The previously observed WireGuard engine crash on Stop remains a separate release
+blocker; these changes do not claim to fix it.
+
+A disposable 100.19 MiB/250,000-record fixture measured 153.32 MiB of compact cache,
+13.94 seconds to import, 83.75 ms source-query p95 and 99.61 ms marker-save p95
+(20 samples during drain). Stopped drain plus normalized timeline export took
+7.25 seconds; that figure excludes ZIP packaging. Cold exact substring search
+took 13.96 seconds; the cached query took 92.9 ms, and cancellation took 0.31 ms.
+These are local synthetic measurements, not device performance guarantees.
+
+The full Swift save pipeline was measured separately with a fresh cache,
+105,000,000 raw log bytes (100.136 MiB), 250,000 log records, two network events
+with fixed 4,776/10,880-byte bodies, and one marker. After bounding Foundation
+allocations, **fresh-cache drain → timeline → validated/checksummed ZIP took
+26.255 seconds**, with 20.906 MiB peak save-process RSS. A warm-cache save took
+13.694 seconds and 15.453 MiB peak save-phase RSS. The resulting 9,183,207-byte ZIP
+preserved all 250,003 raw-derived IDs/references and exact raw/HAR/timeline bodies;
+all nine checksums passed. This synthetic fixture intentionally omits native flows,
+so its manifest correctly reports partial network evidence. It is a save/load
+benchmark, not a live capture or native-engine proof.
+
+The original fresh-cache run took 30.071 seconds; the original warm run reached
+785 MiB peak RSS in validation. Per-record and per-read autorelease pools removed
+that retained-object amplification. Both corrected measurements use optimized
+Swift 6 with warnings as errors on this Apple M5 Pro Mac. Fixture generation and
+independent ZIP verification run outside the timed process.
+
+Repeat the file-only full-save benchmark with
+`Scripts/benchmark-capture-save.sh` (`--keep` retains its private synthetic artifacts).
+It reports one fresh-cache and one warm-cache run and independently checks the
+resulting ZIPs. Timings and memory are reported rather than imposed as universal
+CI thresholds; build or evidence-integrity failures still fail the script.
+The checked-in entry point was then exercised end-to-end: 25.735 seconds fresh,
+13.803 seconds warm, with peak RSS below 20 MiB and both ZIP verifiers passing.
+These fixtures use highly compressible synthetic logs; real device/SDK workloads
+still require the deferred checks below.
+
+Automated checks: eight writer tests, fourteen native timeline tests (the optional
+load benchmark run separately), thirty-two lifecycle/scope/cancellation tests,
+thirty-four discovery/export tests, five command-target tests, eight native-list
+tests and the store integration harness pass. The legacy Python regression suite
+passes 64 tests with one optional native-engine case skipped. No connected-device,
+Simulator or visual test was performed for this checkpoint.
+
+Next-session acceptance checks:
+
+1. Android: choose the neutral fixture, capture emitted debug/info SDK-style logs
+   and a nonce request, relaunch its process, and confirm both launches stay in scope.
+   Verify UID capability probing on the actual OS; exercise the safe fallback only
+   where its process metadata is readable. Confirm a reinstall/identity failure
+   ends logs without stopping network, with an explicit exported gap.
+2. iPhone: verify installed-app executable discovery or supply the exact engineer
+   executable override. Capture an app relaunch and configured helper. A combined
+   nonce proof needs a signed neutral fixture or engineer test build; Safari alone
+   cannot provide app-log correlation. Check tunnel-off confirmation and clean Stop.
+3. Simulator: verify installed-app and extension resolution, capture a relaunch,
+   and restore the exact Mac service proxy after Stop.
+4. On each platform, use smaller limits for a short test. Verify prior rows remain,
+   network continues after a log limit, the end-of-coverage event is visible, and
+   every admitted raw record appears in the ZIP with valid references/checksums.
+5. Inspect layout and VoiceOver/keyboard labels, markers and display controls.
+   Exercise Cancel Save after verified shutdown, retain any previous ZIP, retry,
+   and reopen a large saved session with indexing pause/resume.
+
 Proposed implementation checkpoints for Android devices and emulators, physical
 iPhones, and iOS Simulator. The goal is useful ad SDK evidence without the
 unbounded whole-device recording and large temporary index seen in the
@@ -27,7 +101,7 @@ The app stays generic and requires no company repository, SDK or domain list.
 The first log limit reached wins. These are starting product defaults, to be
 adjusted after the load tests below. Limits are configured before Start and
 recorded in the package. There is no unlimited preset in the initial version.
-Until app-scoped collection is implemented, leave device logs off by default.
+Device logs remain off by default until the user enables them and selects a scope.
 The record budget counts persisted nonblank raw lines, including continuation
 lines, because each currently contributes an indexed timeline entry.
 

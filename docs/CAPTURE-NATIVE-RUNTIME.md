@@ -19,6 +19,9 @@ pending. See the [physical iPhone observations](CAPTURE-PROOF.md#physical-iphone
 | `NativeCaptureDiscovery` | Resolve explicit executable overrides, discover ADB devices, available Simulators and paired physical iPhones through `devicectl`, list enabled Mac network services |
 | `IPhoneCaptureSetup` | Keep stable per-device tunnel keys and client profiles in private application support, validate the Mac endpoint and export a mode-600 client profile only on request |
 | `NativeTimelineStore` | Incrementally index raw evidence in private SQLite storage, query bounded pages, load full details, append markers and stream the complete normalized timeline |
+| `CaptureLogDiscovery` | Resolve installed apps/executables, Android user/UID capabilities and explicit helper scope before routing changes |
+| `CaptureBoundedLogWriter` | Enforce byte/record/duration limits before log persistence and report retained tails/diagnostic overflow |
+| `CaptureSaveCoordinator` | Allow per-operation authenticated cancellation only after routing restoration and verified shutdown, serialized with ZIP publication |
 | `mobile-capture-host` | Own a session supervisor, coordinate collectors, restore routing and publish the evidence ZIP |
 | `mobile-capture-proxy` | Apply and restore an exact Mac service proxy snapshot through SystemConfiguration and scoped network-settings authorization |
 | `CaptureEvidenceExporter` | Stream the raw allowlist, validate normalized references, build public metadata/checksums and atomically publish one ZIP |
@@ -33,6 +36,8 @@ mobile-capture-host status --session /absolute/session-directory
 mobile-capture-host stop --session /absolute/session-directory
 # Only after the user has turned the capture tunnel off on the iPhone:
 mobile-capture-host stop-iphone-tunnel-off --session /absolute/session-directory
+# Only during the routing-restored, collectors-stopped save stages:
+mobile-capture-host cancel-save --session /absolute/session-directory
 ```
 
 Successful responses contain `session`. Errors contain `error` and, once one is
@@ -48,6 +53,12 @@ compiled proxy helper beside itself and the addon under
 `../Resources/CaptureRuntime`. A private `lock_directory` override, or the
 legacy `CAPTURE_RUNTIME_STATE_DIRECTORY` environment setting, isolates synthetic
 tests. Normal captures share the per-user lock under `/tmp`.
+
+New log requests require `log_scope` with `mode: app`, `application_id`, optional
+`helper_process_names` and `executable_override`, or an explicit `mode: whole_device`.
+A missing scope never grants broad collection. `logging_policy` records the bounded
+limits; omission uses 200 MB/250,000 records/600 seconds. These additive schema-1
+fields are described in the [logging plan](CAPTURE-LOGGING-PLAN.md).
 
 Physical iPhone uses `platform: iphone`, a hardware `device_id`, and
 `iphone_endpoint_host` for the Mac's reachable LAN IPv4 address or hostname.
@@ -80,10 +91,16 @@ Tokens and recovery state never enter the export.
 
 Each collector has a dedicated worker and a supervisor-owned stdin pipe. The
 worker uses `posix_spawn` to create the collector in an owned process group and
-streams output directly into private files. Closing the pipe, including
+admits log output through the bounded Swift writer into private files. Diagnostic
+streams are bounded separately, with overflow recorded. Closing the pipe, including
 supervisor death, tells the worker to stop its collector. Shutdown sends SIGINT
 to let mitmproxy flush evidence, then escalates to SIGTERM and SIGKILL if needed.
 Inherited worker signal dispositions are reset before starting the collector.
+
+Android app scope uses one identity-monitor task and a latest-result slot, rather
+than spawning work for each stream chunk. Cancelling it prevents further probes;
+an already-running read-only ADB probe can finish within its eight-second timeout.
+Log admission and the owned collector's shutdown are enforced independently.
 
 Workers publish atomic `*-worker.result.json` receipts after verifying child
 termination. Recovery never signals a PID read from disk. A missing receipt or
@@ -154,8 +171,9 @@ profile in WireGuard, starts capture on the Mac, then enables the tunnel on the
 phone. Installing the public CA profile and separately enabling full SSL trust
 remain manual first-time setup. The generated tunnel routes IPv4; IPv6 may
 bypass it, and certificate pinning or unsupported protocols can leave gaps.
-The optional app identifier is investigation context rather than a network or
-device-log isolation boundary.
+App log scope is independent of tunnel attribution: selecting an app does not
+isolate network requests to that app. USB executable-name filters can include
+unrelated processes if names are shared; the package describes that limitation.
 
 Ordinary `stop` refuses to end an active iPhone network tunnel without recorded
 user confirmation that the phone tunnel is off. After turning WireGuard off on
@@ -169,16 +187,23 @@ not change the Mac's network-service proxy or use Android ADB reverse routing.
 
 ## Timeline and package boundaries
 
-The UI queries a disposable SQLite index instead of full Python snapshots. Raw
+The UI queries a disposable SQLite index instead of full Python snapshots. Its
+`runtime/native-timeline/compact-v3.sqlite` stores raw offsets/lengths, stable IDs,
+timestamps and previews. Full event JSON and body/detail copies are reconstructed
+on demand, including exact substring search. Older `index.sqlite` files are left
+untouched so an existing connection is not invalidated by migration. Raw
 evidence remains authoritative. Pause Display and Clear View use ingestion
 sequence boundaries; source timestamps still determine shared timeline order.
 Neither control changes device buffers or captured files.
 
-During active capture, live refreshes use bounded reads per evidence source and
+Live refreshes, including saved-session imports, use bounded reads per source and
 prioritize network events and markers before high-volume device logs. The index
 can lag behind raw capture; the UI reports the pending backlog while ingestion
 catches up. Indexed counts are not a retention limit. Collected raw evidence
-continues to be written regardless of the displayed page, filter or live budget.
+continues to be written regardless of the displayed page, filter or live budget,
+until the configured collector limit. Pausing import skips ingestion even when
+filters or paging change. Metadata and worker telemetry are read independently
+of cache catch-up, and obsolete poll/query work shares one cancellable owner.
 
 iPhone USB collectors run with `TZ=UTC` and `LC_ALL=C`. Their raw timestamps omit
 the year, so normalization records an explicitly inferred year nearest the
@@ -191,9 +216,10 @@ log line; unrelated phone processes and traffic may also be present.
 The USB syslog stream is not a complete unified-log archive, and OS privacy
 redaction can limit the available messages.
 
-After collectors stop, the host calls `refresh(collectorsStopped: true)` to
+After collectors stop, the host calls `drain(collectorsStopped: true)` to
 include unterminated final records while metadata still says `stopping`. The
-live byte budget does not apply to this final drain. The complete normalized
+drain commits and yields in bounded batches, reports progress and supports task
+cancellation. The complete normalized
 timeline is streamed to a private temporary file. Saving a large raw log can
 therefore take longer than a live refresh; completion is reported only after
 the package is published. The exporter copies only six permitted raw paths,
@@ -201,6 +227,14 @@ validates event IDs/references against those staged bytes, derives completeness
 and checksums, and atomically
 replaces `capture-package.zip`. Private indexes, sockets, tokens, journals,
 worker diagnostics, arbitrary files and CA stores remain excluded.
+
+`Cancel Save` uses a fresh private per-save token and operation ID, including for
+legacy folders without capture control state. A private `flock` serializes accepted
+cancellation with the final publication gate. Cancellation is enabled only after
+restoration and verified worker receipts; it retains raw evidence and the prior
+ZIP, cleans staging, marks the session retryable and releases the routing lease.
+Byte hashing and strict raw-line identity/reference checks remain enabled. Per-read
+and per-record autorelease pools bound Foundation allocations during large saves.
 
 ## Legacy compatibility
 
@@ -247,8 +281,10 @@ targets; the current physical-iPhone implementation still requires its own
 completed combined logs/network/export proof. The separate network-only hardware
 proof verified exact Safari/HAR/native/timeline bodies, but the bundled engine
 crashed during shutdown and its ZIP correctly retained partial status. Whole-device
-logging also produced excessive raw/index volume; app scope, recording limits,
-compact indexing and clean shutdown remain release work. Pinning, QUIC and proxy bypass
+logging also produced excessive raw/index volume. App scope, recording limits
+and compact indexing are now implemented and synthetically tested; their new
+hardware validation and the separate engine clean-shutdown fix remain release work.
+Pinning, QUIC and proxy bypass
 remain capture gaps. Prepared builds bundle the pinned Android and network
 dependencies described in [distribution](CAPTURE-DISTRIBUTION.md); bundling the
 external iPhone USB tools and validating Developer ID/notarization remain
