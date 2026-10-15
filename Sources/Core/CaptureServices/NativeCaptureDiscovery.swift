@@ -178,7 +178,9 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
                 if result.isSuccess {
                     let coreDevices = try Self.parseIPhoneDevices(Data(contentsOf: jsonOutput))
                     // A failed current USB probe must not be made green by a cached Wi-Fi entry.
-                    devices += coreDevices.filter { incoming in !devices.contains { $0.platform == incoming.platform && $0.id == incoming.id } }
+                    devices += coreDevices.filter { incoming in
+                        !devices.contains { $0.platform == incoming.platform && $0.id.caseInsensitiveCompare(incoming.id) == .orderedSame }
+                    }
                 } else { warnings.append(Self.failure("iPhone discovery", result: result)) }
             } catch is CancellationError { throw CancellationError() }
             catch { warnings.append("iPhone discovery returned unreadable device information: \(error.localizedDescription)") }

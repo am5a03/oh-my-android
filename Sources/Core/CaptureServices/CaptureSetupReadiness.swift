@@ -214,7 +214,10 @@ nonisolated struct CaptureSetupInspector: Sendable {
                 }
             }
             if request.device?.platform == "iphone" {
-                if let host = request.iphoneEndpointHost, (try? IPhoneCaptureSetup.validatedEndpointHost(host)) != nil,
+                if profile.state != .readyToTry {
+                    check("iphone_profile", profile.state, "Saved iPhone Capture Tunnel", profile.message, profile.code, .localInspection,
+                          profile.state == .needsEngineerHelp ? [.askEngineer] : [.setUpIPhoneTunnel, .chooseEndpoint])
+                } else if let host = request.iphoneEndpointHost, (try? IPhoneCaptureSetup.validatedEndpointHost(host)) != nil,
                    profile.endpoint == host {
                     check("iphone_profile", profile.state, "Saved iPhone Capture Tunnel", profile.message, profile.code, .localInspection,
                           profile.state == .readyToTry ? [.setUpIPhoneTunnel] : [.setUpIPhoneTunnel, .chooseEndpoint])

@@ -52,16 +52,26 @@ nonisolated struct CaptureSetupLocalInspection: Sendable {
                 return Result(state: .actionNeeded, message: "Prepare this phone's stable capture tunnel profile, then import it in WireGuard.", code: "iphone_profile_missing")
             }
             let lines = text.split(whereSeparator: \.isNewline).map(String.init)
+            let privateKeys = lines.filter { $0.hasPrefix("PrivateKey = ") }
             let publicKeys = lines.filter { $0.hasPrefix("PublicKey = ") }
             let endpoints = lines.filter { $0.hasPrefix("Endpoint = ") }
-            guard publicKeys.count == 1, endpoints.count == 1,
+            guard privateKeys.count == 1, publicKeys.count == 1, endpoints.count == 1,
+                  let privateKey = Data(base64Encoded: String(privateKeys[0].dropFirst("PrivateKey = ".count))), privateKey.count == 32,
+                  let client = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: privateKey),
                   let key = Data(base64Encoded: String(publicKeys[0].dropFirst("PublicKey = ".count))), key.count == 32,
                   endpoints[0].hasSuffix(":\(IPhoneCaptureSetup.listenPort)") else {
                 return Result(state: .needsEngineerHelp, message: "The saved tunnel profile metadata is inconsistent. Ask an engineer to inspect it; no keys or profile files were changed.", code: "iphone_profile_invalid")
             }
             let host = String(endpoints[0].dropFirst("Endpoint = ".count).dropLast(":\(IPhoneCaptureSetup.listenPort)".count))
             let endpoint = try IPhoneCaptureSetup.validatedEndpointHost(host)
-            return Result(state: .readyToTry, message: "A private saved profile exists for this phone and Mac endpoint. Its presence does not establish phone import, activation or network reachability.", code: "iphone_profile_present", fingerprint: Self.digest(key), endpoint: endpoint)
+            // Bind cached evidence to both public peers and the endpoint. Never export or
+            // directly fingerprint private bytes; deriving the client public identity also
+            // validates the saved key without changing or regenerating the profile.
+            var identity = Data("mobile-capture-profile-v2\0".utf8)
+            identity.append(client.publicKey.rawRepresentation)
+            identity.append(key)
+            identity.append(Data("\0\(endpoint.lowercased()):\(IPhoneCaptureSetup.listenPort)".utf8))
+            return Result(state: .readyToTry, message: "A private saved profile exists for this phone and Mac endpoint. Its presence does not establish phone import, activation or network reachability.", code: "iphone_profile_present", fingerprint: Self.digest(identity), endpoint: endpoint)
         } catch {
             return Result(state: .needsEngineerHelp, message: "The existing private profile could not be inspected safely. Ask an engineer to review its permissions or format; nothing was repaired or regenerated.", code: "iphone_profile_unsafe")
         }

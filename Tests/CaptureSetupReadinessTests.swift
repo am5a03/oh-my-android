@@ -88,6 +88,24 @@ struct CaptureSetupReadinessTests {
         try require(savedProfile.identity.profileFingerprint?.count == 64 && check(savedProfile, "iphone_profile").state == .readyToTry,
                     "saved profile exposes only public peer identity and remains unverified on phone")
         try require(check(savedProfile, "device_routing").state == .unverified, "saved profile does not certify phone tunnel")
+        let replacementClientKey = Data(repeating: 18, count: 32)
+        try fixture.profile(deviceID: iphone.id, endpoint: "192.0.2.3", mode: 0o600, clientKey: replacementClientKey)
+        let changedClient = await inspector.inspect(request)
+        try require(changedClient.identity.profileFingerprint != savedProfile.identity.profileFingerprint && changedClient.identity.fingerprint != savedProfile.identity.fingerprint,
+                    "changing only the client peer invalidates profile and setup identities")
+        let phonePortable = String(decoding: try JSONEncoder().encode(changedClient), as: UTF8.self)
+        try require(!phonePortable.contains(replacementClientKey.base64EncodedString()) && !phonePortable.contains("PrivateKey"), "profile identity exposes no private key bytes")
+        let validProfile = try Data(contentsOf: profileFile)
+        var duplicate = validProfile
+        duplicate.append(Data("PrivateKey = \(replacementClientKey.base64EncodedString())\n".utf8))
+        try duplicate.write(to: profileFile)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: profileFile.path)
+        let duplicateCheck = check(await inspector.inspect(request), "iphone_profile")
+        try require(duplicateCheck.code == "iphone_profile_invalid", "duplicate private-key assignments are rejected: \(duplicateCheck.code)")
+        try fixture.profile(deviceID: iphone.id, endpoint: "192.0.2.3", mode: 0o600, clientKey: Data(repeating: 18, count: 31))
+        try require(check(await inspector.inspect(request), "iphone_profile").code == "iphone_profile_invalid", "malformed private keys are rejected without regeneration")
+        try validProfile.write(to: profileFile)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: profileFile.path)
         inspector.caDirectory = fixture.root.appendingPathComponent("missing-ca")
         let missingCA = await inspector.inspect(request)
         try require(missingCA.identity.caFingerprint == nil && check(missingCA, "certificate").state == .actionNeeded,
@@ -139,11 +157,11 @@ struct CaptureSetupReadinessTests {
             let id = SHA256.hash(data: Data(deviceID.utf8)).map { String(format: "%02x", $0) }.joined()
             return profiles.appendingPathComponent(id).appendingPathComponent("MobileCapture.conf")
         }
-        func profile(deviceID: String, endpoint: String, mode: Int) throws {
+        func profile(deviceID: String, endpoint: String, mode: Int, clientKey: Data = Data(repeating: 17, count: 32)) throws {
             let profile = profileFile(deviceID: deviceID)
             try FileManager.default.createDirectory(at: profile.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let key = Data(repeating: 7, count: 32).base64EncodedString()
-            try Data("[Interface]\nPrivateKey = PRIVATE_FIXTURE_ONLY\n[Peer]\nPublicKey = \(key)\nEndpoint = \(endpoint):51820\n".utf8).write(to: profile)
+            try Data("[Interface]\nPrivateKey = \(clientKey.base64EncodedString())\n[Peer]\nPublicKey = \(key)\nEndpoint = \(endpoint):51820\n".utf8).write(to: profile)
             try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: profile.path)
             let server = profile.deletingLastPathComponent().appendingPathComponent("server.json")
             try Data("{}".utf8).write(to: server)

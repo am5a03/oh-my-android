@@ -24,7 +24,7 @@ struct CaptureUSBDiscoveryTests {
             ideviceIDPath: tools["idevice_id"], ideviceInstallerPath: tools["ideviceinstaller"])
         let result = try await discovery.discover(configuration: configuration)
         try require(result.devices.filter { $0.platform == "iphone" }.count == 1 && result.devices.first?.name == "USB Fixture",
-                    "USB and CoreDevice hardware IDs deduplicate with current USB metadata")
+                    "USB and CoreDevice hardware IDs deduplicate across letter case with current USB metadata")
         try require(result.warnings.contains { $0.contains("not verified logging/trust") }, "ready-to-try USB metadata never claims trust or observed logs")
         try require(result.tools["ideviceinstaller"] == tools["ideviceinstaller"], "installed metadata can use packaged installer")
         try require(try discovery.resolve(nil, name: "ideviceinfo", candidates: ["/usr/bin/true"])?.path == tools["ideviceinfo"], "bundled candidate takes precedence")
@@ -77,7 +77,7 @@ private actor USBDiscoveryFixtureRunner: ShellRunning {
             return ShellResult(stdout: String(decoding: data, as: UTF8.self), stderr: "", exitCode: 0)
         }
         if name == "devicectl", let position = arguments.firstIndex(of: "--json-output") {
-            let value: [String: Any] = ["result": ["devices": [["hardwareProperties": ["udid": identifier, "deviceType": "iPhone", "platform": "iOS", "reality": "physical"], "deviceProperties": ["name": "Cached CoreDevice"], "connectionProperties": ["pairingState": "paired", "tunnelState": "connected"]]]]]
+            let value: [String: Any] = ["result": ["devices": [["hardwareProperties": ["udid": identifier.lowercased(), "deviceType": "iPhone", "platform": "iOS", "reality": "physical"], "deviceProperties": ["name": "Cached CoreDevice"], "connectionProperties": ["pairingState": "paired", "tunnelState": "connected"]]]]]
             try JSONSerialization.data(withJSONObject: value).write(to: URL(fileURLWithPath: arguments[position + 1]))
         }
         if name == "simctl" { return ShellResult(stdout: "{\"devices\":{}}", stderr: "", exitCode: 0) }
