@@ -131,10 +131,12 @@ nonisolated struct CaptureLogDiscovery: Sendable {
         if device.platform == "iphone" {
             let logger = try tool("idevicesyslog", tools)
             let help = try await checked(logger, ["--help"])
-            guard help.stdout.contains("--process"), help.stdout.contains("--no-kernel") else {
+            guard help.stdout.contains("--process") else {
                 throw AppError("The installed iPhone log collector does not support verified process filtering. Update libimobiledevice or choose network-only capture.")
             }
-            return try Self.resolved(command: [logger, "--udid", device.id, "--exit", "--no-colors", "--no-kernel", "--process", names.joined(separator: "|")], context: context)
+            // Process inclusion already excludes unrelated kernel messages. libimobiledevice
+            // rejects combining its inclusion filter (-p) with kernel exclusion (-K).
+            return try Self.resolved(command: [logger, "--udid", device.id, "--exit", "--no-colors", "--process", names.joined(separator: "|")], context: context)
         }
         let simctl = try tool("simctl", tools)
         let predicate = names.map { name in

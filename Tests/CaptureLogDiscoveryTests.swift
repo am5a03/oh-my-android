@@ -31,7 +31,8 @@ struct CaptureLogDiscoveryTests {
         let result = try await discovery.resolve(device: Self.device("iphone"), scope: scope, tools: Self.tools)
         #expect(result.filter == nil)
         #expect(result.command.suffix(2) == ["--process", "Engineer Helper|NeutralFixture|NeutralWidget"])
-        #expect(result.command.contains("--no-kernel"))
+        // The collector rejects process inclusion combined with kernel exclusion.
+        #expect(!result.command.contains("--no-kernel"))
         #expect(!result.command.contains("--quiet"))
         #expect(!result.command.contains(where: { $0.hasPrefix("--pid") }))
         let context = try Self.context(result)
@@ -263,7 +264,7 @@ private struct ScopeShell: ShellRunning {
                 : try PropertyListSerialization.data(fromPropertyList: rows, format: .xml, options: 0)
             return .init(stdout: String(decoding: data, as: UTF8.self), stderr: "", exitCode: 0)
         }
-        if name == "idevicesyslog" { return .init(stdout: "--process NAME --no-kernel --no-colors --exit", stderr: "", exitCode: 0) }
+        if name == "idevicesyslog" { return .init(stdout: "--process NAME --no-colors --exit", stderr: "", exitCode: 0) }
         guard name == "adb", arguments.prefix(2) == ["-s", "synthetic-device"] else { throw AppError("Unexpected synthetic scope command") }
         let tail = Array(arguments.dropFirst(2))
         let output: String
