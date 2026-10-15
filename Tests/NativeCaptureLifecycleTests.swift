@@ -633,7 +633,29 @@ struct NativeCaptureLifecycleTests {
         try CaptureLifecycleFiles.write(control, at: directory.appendingPathComponent("runtime/control.json"))
         let supervisor = try CaptureOwnedProcess(executable: fixture.host, arguments: ["_supervise", "--session", directory.path],
             stdout: directory.appendingPathComponent("runtime/supervisor.stdout"), stderr: directory.appendingPathComponent("runtime/supervisor.stderr"))
-        try await LifecycleFixture.wait { (try? NativeCaptureHost.load(directory).text("phase")) == "recording" }
+        let startupBegan = Date()
+        do {
+            // This manually launches a supervisor instead of NativeCaptureHost.start, so use
+            // that entry point's 100-second startup budget. Its discovery commands can each
+            // take 20 seconds and proxy readiness alone allows 25. Under the parallel suite,
+            // synthetic process launch/discovery exceeded the generic 15-second event wait.
+            try await LifecycleFixture.wait(timeout: .seconds(100)) {
+                let phase = try NativeCaptureHost.load(directory).text("phase")
+                if phase == "recording" { return true }
+                if ["saved", "partial", "failed"].contains(phase ?? "") {
+                    throw AppError("Synthetic supervisor completed startup without recording (phase \(phase ?? "unknown")).")
+                }
+                guard supervisor.isRunning else { throw AppError("Synthetic supervisor exited before recording (status \(supervisor.process.terminationStatus)).") }
+                return false
+            }
+        } catch {
+            let diagnostics = await fixture.supervisorStartupDiagnostics(directory, supervisor: supervisor, began: startupBegan)
+            throw AppError("\(error.localizedDescription)\n\(diagnostics)")
+        }
+        let startupSeconds = Date().timeIntervalSince(startupBegan)
+        if startupSeconds > 15 {
+            print("Synthetic supervisor reached recording after \(String(format: "%.2f", startupSeconds)) s within the production 100 s startup budget; test parallelism unchanged.")
+        }
         // This PID comes from a live Process handle that this test created.
         try #require(kill(supervisor.process.processIdentifier, SIGKILL) == 0)
         try await LifecycleFixture.wait { !supervisor.isRunning }
@@ -724,8 +746,60 @@ struct LifecycleFixture {
         try? FileManager.default.removeItem(at: root)
     }
 
-    static func wait(_ condition: () throws -> Bool) async throws {
-        let deadline = ContinuousClock.now + .seconds(15)
+    /// Failure output is restricted to this synthetic fixture's state and bounded worker diagnostics.
+    /// Control/request files and environment values are deliberately excluded.
+    func supervisorStartupDiagnostics(_ directory: URL, supervisor: CaptureOwnedProcess, began: Date) async -> String {
+        let manager = FileManager.default
+        let elapsed = Date().timeIntervalSince(began)
+        let alive = supervisor.isRunning
+        var lines = ["Synthetic supervisor startup diagnostics after \(String(format: "%.2f", elapsed)) s:",
+                     "owned supervisor PID \(supervisor.process.processIdentifier), running=\(alive)",
+                     "synthetic session: \(directory.path)"]
+        if let state = try? NativeCaptureHost.load(directory) {
+            for key in ["phase", "sources", "warnings", "routing_restored", "recording_at"] {
+                if let value = state[key], let data = try? JSONEncoder().encode(value) {
+                    lines.append("state.\(key)=\(String(decoding: data.prefix(2_048), as: UTF8.self))")
+                }
+            }
+        }
+        for relative in ["network/ready.json", "logs/device.log", "routing.json", "android-routing.json"] {
+            let file = relative == "routing.json" ? root.appendingPathComponent(relative) : directory.appendingPathComponent(relative)
+            if let info = try? manager.attributesOfItem(atPath: file.path) {
+                let age = (info[.modificationDate] as? Date).map { String(format: "%.2f", $0.timeIntervalSince(began)) } ?? "unknown"
+                lines.append("\(relative): bytes=\(info[.size] ?? "unknown"), modified_at_start_plus=\(age)s")
+            } else { lines.append("\(relative): absent") }
+        }
+        let runtime = directory.appendingPathComponent("runtime")
+        let names = ((try? manager.contentsOfDirectory(atPath: runtime.path)) ?? []).sorted()
+        for name in names.filter({ $0.hasSuffix(".stdout") || $0.hasSuffix(".stderr") || $0.hasSuffix(".result.json") }).prefix(16) {
+            let path = runtime.appendingPathComponent(name)
+            guard let handle = try? FileHandle(forReadingFrom: path) else { continue }
+            defer { try? handle.close() }
+            if let length = try? handle.seekToEnd() {
+                try? handle.seek(toOffset: length > 1_024 ? length - 1_024 : 0)
+                let tail = (try? handle.read(upToCount: 1_024)) ?? Data()
+                lines.append("runtime/\(name) (\(length) bytes): \(String(decoding: tail, as: UTF8.self))")
+            }
+        }
+        if let output = try? await ProcessShellRunner(timeout: .seconds(5)).run(URL(fileURLWithPath: "/bin/ps"),
+                arguments: ["-axo", "pid=,ppid=,stat=,etime=,pcpu=,comm="]) {
+            let rows = output.stdout.split(separator: "\n").map { $0.split(maxSplits: 5, whereSeparator: \.isWhitespace).map(String.init) }.filter { $0.count == 6 }
+            let synthetic = rows.filter { $0[5].contains("/native-lifecycle-") || $0[5] == host.path }
+            lines.append("active synthetic fixture processes across suite=\(synthetic.count), total process rows=\(rows.count)")
+            var owned = Set([String(supervisor.process.processIdentifier)])
+            var priorCount = -1
+            while owned.count != priorCount {
+                priorCount = owned.count
+                for row in rows where owned.contains(row[1]) || row[5].hasPrefix(root.path + "/") { owned.insert(row[0]) }
+            }
+            lines.append("owned synthetic process rows: pid ppid state elapsed cpu executable")
+            lines += rows.filter { owned.contains($0[0]) }.prefix(16).map { $0.joined(separator: " ") }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    static func wait(timeout: Duration = .seconds(15), _ condition: () throws -> Bool) async throws {
+        let deadline = ContinuousClock.now + timeout
         while try !condition() {
             guard ContinuousClock.now < deadline else { throw AppError("Timed out waiting for synthetic capture process") }
             try await Task.sleep(for: .milliseconds(50))
