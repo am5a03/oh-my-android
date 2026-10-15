@@ -47,7 +47,14 @@ nonisolated final class CaptureEvidenceReferences {
         guard let bytes = try original.handle.read(upToCount: Self.width), bytes.count == Self.width, bytes.first == 1 else {
             throw AppError("The normalized timeline refers to a blank or unreadable raw evidence line.")
         }
-        let expected = "event-" + bytes.dropFirst().map { String(format: "%02x", $0) }.joined()
+        let alphabet = Array("0123456789abcdef".utf8)
+        var identifier = Array("event-".utf8)
+        identifier.reserveCapacity(30)
+        for byte in bytes.dropFirst() {
+            identifier.append(alphabet[Int(byte >> 4)])
+            identifier.append(alphabet[Int(byte & 15)])
+        }
+        let expected = String(decoding: identifier, as: UTF8.self)
         guard id == expected else {
             throw AppError("Raw evidence changed after the timeline was indexed. Refresh the session and retry Save; the prior ZIP was preserved.")
         }
@@ -66,6 +73,8 @@ nonisolated final class CaptureEvidenceReferences {
         let input = try FileHandle(forReadingFrom: original)
         defer { try? input.close() }
         var buffer = Data(), scan = 0, line = 0, events = 0
+        var records = Data()
+        records.reserveCapacity(512 * 1024)
         func writeRecord(_ raw: Data) throws {
             line += 1
             var hash = SHA256()
@@ -73,9 +82,12 @@ nonisolated final class CaptureEvidenceReferences {
             hash.update(data: raw)
             let nonblank = raw.contains(where: { ![9, 10, 11, 12, 13, 32].contains($0) })
             if nonblank { events += 1 }
-            var record = Data([nonblank ? 1 : 0])
-            record.append(contentsOf: hash.finalize().prefix(12))
-            try output.write(contentsOf: record)
+            records.append(nonblank ? 1 : 0)
+            records.append(contentsOf: hash.finalize().prefix(12))
+            if records.count >= 512 * 1024 {
+                try output.write(contentsOf: records)
+                records.removeAll(keepingCapacity: true)
+            }
         }
         while let chunk = try input.read(upToCount: 1024 * 1024), !chunk.isEmpty {
             try Task.checkCancellation()
@@ -98,6 +110,7 @@ nonisolated final class CaptureEvidenceReferences {
             if buffer.last == 13 { buffer.removeLast() }
             try writeRecord(buffer)
         }
+        if !records.isEmpty { try output.write(contentsOf: records) }
         return (line, events)
     }
 }

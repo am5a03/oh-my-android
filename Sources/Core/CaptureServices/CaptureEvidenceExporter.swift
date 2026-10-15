@@ -23,7 +23,7 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
         }
         let timelineRoot = try CaptureEvidenceFiles(directory: normalizedTimeline.deletingLastPathComponent())
         let timelinePath = "timeline/events.jsonl"
-        guard try timelineRoot.copy(normalizedTimeline.lastPathComponent, to: stage.appendingPathComponent(timelinePath)) != nil else {
+        guard let timelineArtifact = try timelineRoot.copy(normalizedTimeline.lastPathComponent, to: stage.appendingPathComponent(timelinePath)) else {
             throw AppError("The complete normalized timeline is missing.")
         }
         let references = try CaptureEvidenceReferences(stage: stage, scratch: work)
@@ -38,9 +38,13 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
         try Self.write(Data(Self.readme.utf8), to: stage.appendingPathComponent("README.txt"))
         let names = (artifacts.map(\.path) + [timelinePath, "manifest.json", "context.json", "README.txt"]).sorted()
         var checksums = ""
+        // These digests cover the exact bytes copied into our private stage.
+        var copiedHashes = Dictionary(uniqueKeysWithValues: artifacts.map { ($0.path, $0.sha256) })
+        copiedHashes[timelinePath] = timelineArtifact.sha256
         for name in names {
-            let hash = try CaptureEvidenceFiles.hash(stage.appendingPathComponent(name))
-            checksums += "\(hash.sha256)  \(name)\n"
+            let hash = try copiedHashes[name]
+                ?? CaptureEvidenceFiles.hash(stage.appendingPathComponent(name)).sha256
+            checksums += "\(hash)  \(name)\n"
         }
         try Self.write(Data(checksums.utf8), to: stage.appendingPathComponent("SHA256SUMS"))
         let archiveNames = (names + ["SHA256SUMS"]).sorted()
@@ -69,11 +73,18 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
         calibration["marker"] = ["offset_ms": 0, "uncertainty_ms": 1, "method": "local_host_clock"]
         result["clock_calibration"] = calibration
         result["counts"] = ["logs": summary.counts["logs", default: 0], "network": summary.counts["network", default: 0], "markers": summary.counts["marker", default: 0]]
+        if summary.counts["status", default: 0] > 0 {
+            var counts = result["counts"] as? [String: Int] ?? [:]
+            counts["status"] = summary.counts["status"]
+            result["counts"] = counts
+        }
         let originalSources = supplied["sources"] as? [String: String] ?? [:]
         var sources = originalSources
         var warnings = result["warnings"] as? [String] ?? []
         var completeness = result["completeness"] as? [String: Any] ?? [:]
-        var partial = completeness["partial"] as? Bool == true || ["failed", "partial", "preparing", "recording", "stopping"].contains(supplied["phase"] as? String ?? "")
+        let logCoverage = completeness["device_logs"] as? [String: Any] ?? [:]
+        var partial = completeness["partial"] as? Bool == true || logCoverage["coverage_ended_before_session_end"] as? Bool == true
+            || ["failed", "partial", "preparing", "recording", "stopping"].contains(supplied["phase"] as? String ?? "")
         var status: [String: Any] = [:]
         var missing: [String] = []
         let present = Dictionary(uniqueKeysWithValues: artifacts.map { ($0.path, $0.bytes) })
@@ -192,11 +203,16 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
     Open manifest.json first. It records selected sources, failures, missing files,
     incomplete requests, clock calibration, routing restoration and package state.
     context.json contains portable session context. timeline/events.jsonl combines
-    logs, network events and user markers in UTC time order. Each raw_ref identifies
+    logs, network events, user markers and companion capture_status records in UTC
+    time order. Companion status records are separate from user marker counts.
+    Each raw_ref identifies
     an original evidence file and one-based line (#Lnumber); native flow references
     are retained in detail.native_ref. The timeline is untruncated in this package.
 
-    logs/device.log is the original Android epoch logcat or Simulator NDJSON stream.
+    logs/device.log retains the selected Android, Simulator or iPhone log stream.
+    context.device_logs and context.log_scope describe collection scope, limits,
+    coverage and stop reason. A log limit stops only logs; network may continue.
+    A partial final log line is explicitly reported; existing bytes are retained.
     network/events.jsonl is the original network event stream. capture.har and
     capture.mitm, when present, preserve exported HTTP bodies and native flows.
     network/incomplete.json, when present, retains the collector's pending requests.
@@ -263,7 +279,7 @@ private nonisolated struct TimelineSummary {
             throw AppError("The normalized timeline contains an invalid event or unresolved raw evidence reference.")
         }
         try references.validate(id: id, source: source, path: String(rawRef[..<separator.lowerBound]), line: lineNumber)
-        counts[source, default: 0] += 1
+        counts[source == "marker" && kind == "capture_status" ? "status" : source, default: 0] += 1
         if source == "logs", kind != "collector_status" { observedLogEvents += 1 }
         if event["clock_uncertainty_ms"] == nil || event["clock_uncertainty_ms"] is NSNull { unknownClockEvents += 1 }
         if ["unparsed_log", "parse_error"].contains(kind) { unparsedRefs.append(rawRef) }

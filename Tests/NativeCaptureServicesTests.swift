@@ -201,6 +201,31 @@ struct NativeCaptureServicesTests {
         #expect(manifest["network_diagnostics"] as? [String: Int] == ["decoded_http_events": 2, "tls_errors": 1, "certificate_rejections": 1, "request_errors": 0])
     }
 
+    @Test func exporterSeparatesCompanionStatusAndRetainsEndedLogCoverage() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        try fixture.populate()
+        let journal = fixture.session.appendingPathComponent("timeline/markers.jsonl")
+        try Data("marker original\nlimit reached\n".utf8).write(to: journal)
+        var events = try fixture.events()
+        events.append(["timestamp": "2026-10-15T00:00:30Z", "source": "marker", "kind": "capture_status",
+            "raw_ref": "timeline/markers.jsonl#L2", "detail": ["origin": "companion", "reason": "record_limit"], "clock_uncertainty_ms": 1])
+        try fixture.writeEvents(events)
+        var metadata = try #require(JSONSerialization.jsonObject(with: fixture.manifest()) as? [String: Any])
+        metadata["completeness"] = ["device_logs": ["coverage_ended_before_session_end": true, "partial_tail": false]]
+        metadata["context"] = ["device_logs": ["completion_reason": "record_limit", "persisted_records": 250_000]]
+        let archive = try await CaptureEvidenceExporter().export(sessionDirectory: fixture.session,
+            manifestJSON: JSONSerialization.data(withJSONObject: metadata), normalizedTimeline: fixture.timeline)
+        let output = try await fixture.extract(archive)
+        let manifest = try fixture.json(output.appendingPathComponent("manifest.json"))
+        #expect(manifest["counts"] as? [String: Int] == ["logs": 1, "network": 2, "markers": 1, "status": 1])
+        #expect(manifest["package_state"] as? String == "partial")
+        let context = try #require(manifest["context"] as? [String: Any])
+        let logs = try #require(context["device_logs"] as? [String: Any])
+        #expect(logs["completion_reason"] as? String == "record_limit")
+        #expect(try Data(contentsOf: output.appendingPathComponent("timeline/markers.jsonl")) == Data(contentsOf: journal))
+    }
+
     @Test(arguments: ["logs/device.log", "network", "timeline/markers.jsonl", "capture-package.zip"])
     func exporterRejectsSymlinksAndKeepsPriorPackage(_ relative: String) async throws {
         let fixture = try Fixture()
