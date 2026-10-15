@@ -298,9 +298,11 @@ struct CaptureView: View {
                     Text("Choose a connected device…").tag("")
                     ForEach(store.devices, id: \.selectionID) { device in
                         Text("\(device.name) · \(device.platformName) · \(device.state)").tag(device.selectionID)
+                            .selectionDisabled(!device.isReady)
                     }
                     if !store.selectedDeviceID.isEmpty, store.selectedDevice == nil {
                         Text("Selected device unavailable").tag(store.selectedDeviceID)
+                            .selectionDisabled(true)
                     }
                 }
                 .frame(maxWidth: 560)

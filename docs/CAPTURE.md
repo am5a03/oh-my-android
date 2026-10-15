@@ -8,6 +8,10 @@ and/or network requests, and click **Start Capture**. Use the device, add marker
 for reproduction steps, then click **Stop & Save**. The result is one ZIP and a
 shared timeline linking log messages and network events to original evidence.
 
+The Device menu dims unavailable devices, including shut-down Simulators and
+offline or unauthorized Android devices. Their state remains visible; boot or
+authorize the device, then choose **Refresh** to make it selectable.
+
 After **Stop & Save** finishes, a persistent **Capture Saved** confirmation offers
 **Export ZIP…** and **Show in Finder**. Review the timeline below or use **Start
 Capture** to record another session. A saved package with incomplete coverage is
