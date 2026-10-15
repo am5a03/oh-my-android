@@ -5,6 +5,100 @@ import Testing
 
 @Suite("Native capture host lifecycle")
 struct NativeCaptureLifecycleTests {
+    @Test func workerEnforcesByteAndDiagnosticCapsBeforePersistence() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let directory = fixture.root.appendingPathComponent("bounded-worker")
+        for name in ["runtime", "logs"] { try CaptureLifecycleFiles.privateDirectory(directory.appendingPathComponent(name)) }
+        var policy = CaptureLoggingPolicy()
+        policy.max_bytes = 4_096; policy.warning_bytes = 2_048; policy.max_stderr_bytes = 64
+        let config = CaptureWorkerConfiguration(command: ["/bin/sh", "-c", "/usr/bin/head -c 131072 /dev/zero >&2; exec /usr/bin/yes log"],
+            output: directory.appendingPathComponent("logs/device.log").path, stderr: directory.appendingPathComponent("runtime/logs.stderr").path,
+            logging_policy: policy)
+        let configURL = directory.appendingPathComponent("runtime/logs-worker.json")
+        try CaptureLifecycleFiles.write(config, at: configURL)
+        let worker = try CaptureOwnedProcess(executable: fixture.host, arguments: ["_worker", "--config", configURL.path],
+            stdout: directory.appendingPathComponent("runtime/worker.stdout"), stderr: directory.appendingPathComponent("runtime/worker.stderr"), keepAlivePipe: true)
+        defer { worker.requestStop(); worker.process.waitUntilExit() }
+        try await LifecycleFixture.wait { !worker.isRunning }
+        let receipt = try CaptureLifecycleFiles.read(CaptureWorkerReceipt.self, at: directory.appendingPathComponent("runtime/logs-worker.result.json"))
+        #expect(receipt.exit_code != nil)
+        #expect(receipt.error == nil)
+        #expect(receipt.log_capture?.completion_reason == .byteLimit)
+        #expect(receipt.log_capture?.persisted_bytes == 4_096)
+        #expect(try Data(contentsOf: directory.appendingPathComponent("logs/device.log")).count == 4_096)
+        #expect(try Data(contentsOf: directory.appendingPathComponent("runtime/logs.stderr")).count == 64)
+        let overflow: Int64 = 131_008
+        #expect(receipt.diagnostics?.stderr_overflow_bytes == overflow)
+        #expect(receipt.log_capture?.diagnostic_overflow_bytes == overflow)
+    }
+
+    @Test func intentionalLogCapKeepsNetworkAliveAndExportsExplicitCoverageGap() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        var policy = CaptureLoggingPolicy()
+        policy.max_records = 1; policy.warning_records = 1
+        let request = try fixture.request(platform: "android", loggingPolicy: policy)
+        let started = try await fixture.call(["start", "--request", request.path])
+        let session = try #require(started.session)
+        let directory = URL(fileURLWithPath: try #require(session.text("directory")))
+        try await LifecycleFixture.wait {
+            (try? NativeCaptureHost.load(directory)["context"]?.object["device_logs"]?.object.text("completion_reason")) == "record_limit"
+        }
+        #expect(try NativeCaptureHost.load(directory).text("phase") == "recording")
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-running").path))
+        let receipt = try CaptureLifecycleFiles.read(CaptureWorkerReceipt.self, at: directory.appendingPathComponent("runtime/logs-worker.result.json"))
+        #expect(receipt.exit_code != nil)
+        #expect(receipt.log_capture?.persisted_records == 1)
+        #expect(receipt.log_capture?.partial_tail_bytes == 0)
+        let stopped = try await fixture.call(["stop", "--session", directory.path])
+        #expect(stopped.session?.text("phase") == "partial")
+        #expect(stopped.session?["completeness"]?.object["device_logs"]?.object["coverage_ended_before_session_end"] == .bool(true))
+        let archive = URL(fileURLWithPath: try #require(stopped.session?.text("package_path")))
+        let extracted = try await fixture.extract(archive)
+        let events = try fixture.events(extracted.appendingPathComponent("timeline/events.jsonl"))
+        #expect(events.contains { $0["kind"] as? String == "capture_status" })
+        #expect(events.contains { $0["source"] as? String == "logs" })
+        #expect(events.contains { $0["source"] as? String == "network" })
+    }
+
+    @Test func logsOnlyDurationCapAutomaticallyFinalizesRetainedEvidence() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        var policy = CaptureLoggingPolicy()
+        policy.max_duration_seconds = 1; policy.warning_duration_seconds = 0.5
+        let request = try fixture.request(platform: "android", captureNetwork: false, loggingPolicy: policy)
+        let started = try await fixture.call(["start", "--request", request.path])
+        let directory = URL(fileURLWithPath: try #require(started.session?.text("directory")))
+        try await LifecycleFixture.wait { try !NativeCaptureHost.load(directory).isCaptureActive }
+        let saved = try NativeCaptureHost.load(directory)
+        #expect(saved.text("phase") == "saved")
+        #expect(saved.text("package_path") != nil)
+        #expect(saved["context"]?.object["device_logs"]?.object.text("completion_reason") == "duration_limit")
+        #expect(saved["completeness"]?.object["device_logs"]?.object["coverage_complete"] == .bool(true))
+        #expect(try Data(contentsOf: directory.appendingPathComponent("logs/device.log")).count > 0)
+    }
+
+    @Test func iPhoneIntentionalLogCapDoesNotStopUnconfirmedTunnel() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        var policy = CaptureLoggingPolicy()
+        policy.max_records = 2; policy.warning_records = 1
+        let request = try fixture.request(platform: "iphone", loggingPolicy: policy)
+        let started = try await fixture.call(["start", "--request", request.path])
+        let directory = URL(fileURLWithPath: try #require(started.session?.text("directory")))
+        try await LifecycleFixture.wait {
+            (try? NativeCaptureHost.load(directory)["context"]?.object["device_logs"]?.object.text("completion_reason")) == "record_limit"
+        }
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-running").path))
+        let refused = try await fixture.call(["stop", "--session", directory.path])
+        #expect(refused.error?.contains("Tunnel Is Off") == true)
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("engine-running").path))
+        let stopped = try await fixture.call(["stop-iphone-tunnel-off", "--session", directory.path])
+        #expect(stopped.session?.text("package_path") != nil)
+        #expect(stopped.session?["context"]?.object["device_logs"]?.object.text("completion_reason") == "record_limit")
+    }
+
     @Test func physicalIPhoneUSBLogsStopWithoutTunnelConfirmation() async throws {
         let fixture = try LifecycleFixture()
         defer { fixture.cleanup() }
@@ -39,7 +133,8 @@ struct NativeCaptureLifecycleTests {
         #expect(detail["timestamp_basis"] as? String == "source_timestamp")
         #expect(log["original_timestamp"] as? String != nil)
         #expect(log["raw_ref"] as? String == "logs/device.log#L2")
-        #expect(timeline.count == 2)
+        #expect(timeline.filter { $0["source"] as? String == "logs" }.count == 2)
+        #expect(timeline.filter { $0["kind"] as? String == "capture_status" }.count == 1)
         #expect(timeline.filter { $0["kind"] as? String == "collector_status" }.count == 1)
     }
 
@@ -230,7 +325,7 @@ struct NativeCaptureLifecycleTests {
             #expect(routing["configuration_present"] as? Bool == false)
             #expect((routing["configuration"] as? [String: String])?.isEmpty == true)
             #expect(try fixture.json("restore-result.json")["engine_alive"] as? Bool == true)
-            #expect(session["context"]?.object["log_scope"]?.object.text("executable") == "Fixture App")
+            #expect(session["context"]?.object["log_scope"]?.object["executable_names"]?.array == [.string("Fixture App")])
         }
         let first = try Data(contentsOf: directory.appendingPathComponent("capture-package.zip"))
         let repeatStop = try await fixture.call(["stop", "--session", directory.path])
@@ -494,7 +589,7 @@ struct NativeCaptureLifecycleTests {
     }
 }
 
-private struct LifecycleFixture {
+struct LifecycleFixture {
     let root: URL
     let host: URL
     init() throws {
@@ -508,13 +603,14 @@ private struct LifecycleFixture {
         try Data("# synthetic engine does not load this file\n".utf8).write(to: root.appendingPathComponent("runtime-source/network_addon.py"))
     }
 
-    func request(platform: String, captureNetwork: Bool = true) throws -> URL {
+    func request(platform: String, captureNetwork: Bool = true, loggingPolicy: CaptureLoggingPolicy? = nil) throws -> URL {
         let request = NativeCaptureRequest(platform: platform, device_id: platform == "android" ? "fixture-device" : platform == "iphone" ? "fixture-iphone" : "fixture-simulator", device_name: "Fixture", capture_logs: true, capture_network: captureNetwork,
             output_root: root.appendingPathComponent("sessions").path, target_app: platform == "simulator" ? "dev.mobilecapture.fixture" : nil, network_service: "Fixture Wi-Fi", trust_simulator_ca: false,
             adb_path: root.appendingPathComponent("adb").path, simctl_path: root.appendingPathComponent("simctl").path, mitmdump_path: root.appendingPathComponent("mitmdump").path,
             ca_directory: root.appendingPathComponent("ca").path, proxy_helper_path: root.appendingPathComponent("mobile-capture-proxy").path, runtime_directory: root.appendingPathComponent("runtime-source").path, lock_directory: root.appendingPathComponent("lock").path,
             devicectl_path: root.appendingPathComponent("devicectl").path, idevicesyslog_path: root.appendingPathComponent("idevicesyslog").path, ideviceinfo_path: root.appendingPathComponent("ideviceinfo").path,
-            iphone_endpoint_host: "192.0.2.10", iphone_tunnel_directory: root.appendingPathComponent("iphone-private").path)
+            iphone_endpoint_host: "192.0.2.10", iphone_tunnel_directory: root.appendingPathComponent("iphone-private").path,
+            logging_policy: loggingPolicy, log_scope: platform == "simulator" ? .init(applicationID: "dev.mobilecapture.fixture") : .init(mode: .wholeDevice))
         let path = root.appendingPathComponent("request.json")
         try CaptureLifecycleFiles.write(request, at: path)
         return path

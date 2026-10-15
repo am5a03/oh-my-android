@@ -1,5 +1,9 @@
 import Foundation
 
+nonisolated enum CaptureEvidenceExportStage: String, Sendable {
+    case validateEvidence = "validate_evidence", package, publish
+}
+
 /// Publishes the existing portable schema without loading raw captures into memory.
 /// Collectors must be stopped, routing restored/reported, and the timeline refreshed first.
 nonisolated struct CaptureEvidenceExporter: Sendable {
@@ -8,7 +12,8 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
     /// `normalizedTimeline` is a complete, ordered schema-1 JSONL snapshot from NativeTimelineStore.
     /// Metadata is JSON data so arbitrary JSON values do not cross concurrency boundaries.
     @concurrent
-    func export(sessionDirectory: URL, manifestJSON: Data, normalizedTimeline: URL) async throws -> URL {
+    func export(sessionDirectory: URL, manifestJSON: Data, normalizedTimeline: URL,
+                progress: (@Sendable (CaptureEvidenceExportStage) throws -> Void)? = nil) async throws -> URL {
         guard let supplied = try JSONSerialization.jsonObject(with: manifestJSON) as? [String: Any] else {
             throw AppError("The capture manifest must be a JSON object.")
         }
@@ -26,6 +31,7 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
         guard let timelineArtifact = try timelineRoot.copy(normalizedTimeline.lastPathComponent, to: stage.appendingPathComponent(timelinePath)) else {
             throw AppError("The complete normalized timeline is missing.")
         }
+        try progress?(.validateEvidence)
         let references = try CaptureEvidenceReferences(stage: stage, scratch: work)
         let summary = try TimelineSummary.read(stage.appendingPathComponent(timelinePath), references: references)
         let manifest = try Self.packageManifest(supplied, artifacts: artifacts, summary: summary, stage: stage)
@@ -54,7 +60,9 @@ nonisolated struct CaptureEvidenceExporter: Sendable {
             try FileManager.default.setAttributes([.modificationDate: zipDate, .posixPermissions: 0o600], ofItemAtPath: stage.appendingPathComponent(name).path)
         }
         let archive = work.appendingPathComponent("capture-package.zip")
+        try progress?(.package)
         try await Self.archive(stage: stage, destination: archive, names: archiveNames)
+        try progress?(.publish)
         try Task.checkCancellation()
         return try root.publish(archive: archive)
     }
@@ -253,17 +261,17 @@ private nonisolated struct TimelineSummary {
         let input = try FileHandle(forReadingFrom: url)
         defer { try? input.close() }
         var buffer = Data()
-        while let chunk = try input.read(upToCount: 1024 * 1024), !chunk.isEmpty {
+        while let chunk = try autoreleasepool(invoking: { try input.read(upToCount: 1024 * 1024) }), !chunk.isEmpty {
             try Task.checkCancellation()
             buffer.append(chunk)
             var start = buffer.startIndex
             while let end = buffer[start...].firstIndex(of: 10) {
-                try result.consume(Data(buffer[start..<end]), references: references)
+                try autoreleasepool { try result.consume(Data(buffer[start..<end]), references: references) }
                 start = buffer.index(after: end)
             }
             if start > buffer.startIndex { buffer.removeSubrange(buffer.startIndex..<start) }
         }
-        if !buffer.isEmpty { try result.consume(buffer, references: references) }
+        if !buffer.isEmpty { try autoreleasepool { try result.consume(buffer, references: references) } }
         try references.validateComplete()
         return result
     }

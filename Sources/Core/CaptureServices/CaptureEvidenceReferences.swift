@@ -89,7 +89,7 @@ nonisolated final class CaptureEvidenceReferences {
                 records.removeAll(keepingCapacity: true)
             }
         }
-        while let chunk = try input.read(upToCount: 1024 * 1024), !chunk.isEmpty {
+        while let chunk = try autoreleasepool(invoking: { try input.read(upToCount: 1024 * 1024) }), !chunk.isEmpty {
             try Task.checkCancellation()
             buffer.append(chunk)
             var start = 0, ranges: [Range<Int>] = []
@@ -103,7 +103,7 @@ nonisolated final class CaptureEvidenceReferences {
                     } else { scan += 1 }
                 }
             }
-            for range in ranges { try writeRecord(buffer.subdata(in: range)) }
+            for range in ranges { try autoreleasepool { try writeRecord(buffer.subdata(in: range)) } }
             if start > 0 { buffer.removeSubrange(0..<start); scan -= start }
         }
         if !buffer.isEmpty {

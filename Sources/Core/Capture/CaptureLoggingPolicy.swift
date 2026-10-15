@@ -53,4 +53,8 @@ nonisolated struct CaptureLogProgress: Codable, Sendable, Equatable {
     var unpersisted_received_bytes: Int64 = 0
     var diagnostic_overflow_bytes: Int64 = 0
     var threshold_warnings: [String] = []
+    /// Received bytes still awaiting app identity verification; never included in raw evidence.
+    var scope_unverified_bytes: Int64?
+    var scope_status: String?
+    var scope_diagnostics: [String]?
 }

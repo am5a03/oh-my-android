@@ -135,7 +135,7 @@ nonisolated final class CaptureEvidenceFiles {
         defer { try? handle.close() }
         var hash = SHA256()
         var bytes: Int64 = 0
-        while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
+        while let chunk = try autoreleasepool(invoking: { try handle.read(upToCount: 1024 * 1024) }), !chunk.isEmpty {
             try Task.checkCancellation()
             hash.update(data: chunk)
             bytes += Int64(chunk.count)

@@ -8,6 +8,7 @@ enum NativeCaptureHost {
               request.capture_logs || request.capture_network, request.output_root.hasPrefix("/") else {
             throw AppError("Select an explicit Android device, iPhone or Simulator, capture sources and an absolute output directory.")
         }
+        if request.capture_logs { _ = try (request.logging_policy ?? CaptureLoggingPolicy()).validated() }
         let root = URL(fileURLWithPath: request.output_root).standardizedFileURL
         try CaptureLifecycleFiles.privateDirectory(root)
         let identifier = UUID().uuidString.lowercased()
@@ -82,7 +83,7 @@ enum NativeCaptureHost {
         }
         let previousRecoveryAttempt = state.text("recovery_attempt")
         if state.isCaptureActive, CaptureHostSocket.request(directory: directory, action: "stop") {
-            let deadline = ContinuousClock.now + .seconds(95)
+            let deadline = ContinuousClock.now + .seconds(900)
             while ContinuousClock.now < deadline {
                 state = try load(directory)
                 if !state.isCaptureActive { return envelope(state) }
@@ -93,7 +94,9 @@ enum NativeCaptureHost {
             }
             return CaptureHostEnvelope(session: state, error: "Collectors are still stopping. Wait for macOS authorization or retry Stop for recovery.")
         }
-        if !state.isCaptureActive, state["routing_restored"] != .bool(false), state.text("package_path") != nil { return envelope(state) }
+        let priorCompleteness = state["completeness"]?.object ?? [:]
+        if !state.isCaptureActive, state["routing_restored"] != .bool(false), state.text("package_path") != nil,
+           priorCompleteness["export_cancelled_by_user"] != .bool(true), priorCompleteness["export_failed"] != .bool(true) { return envelope(state) }
         let request = try CaptureLifecycleFiles.read(NativeCaptureRequest.self, at: directory.appendingPathComponent("runtime/request.json"))
         let lease: CaptureRoutingLease
         do { lease = try CaptureRoutingLease(sessionDirectory: directory, lockDirectory: lockDirectory(request)) }
@@ -118,6 +121,7 @@ enum NativeCaptureHost {
         if interrupted { state.warn("Recovered after supervisor interruption; final in-flight evidence may be incomplete.") }
         state["phase"] = .string("stopping")
         try save(state, directory)
+        try CaptureSaveCoordinator.writeProgress(directory, stage: "restore_connection")
         do { try await restore(directory: directory, request: request); state["routing_restored"] = .bool(true) }
         catch {
             state["routing_restored"] = .bool(false)
@@ -125,6 +129,7 @@ enum NativeCaptureHost {
             try save(state, directory)
             return CaptureHostEnvelope(session: state, error: error.localizedDescription)
         }
+        try save(state, directory)
         return envelope(try await finalize(directory: directory, state: state, interrupted: interrupted))
     }
 
@@ -152,6 +157,7 @@ enum NativeCaptureHost {
         var startupFailure = false
         var interrupted = false
         var shouldStop = false
+        var completedLogs = false
         do { try await prepare(directory: directory, request: request, state: &state, workers: &workers, executable: executable) }
         catch {
             state.warn(error.localizedDescription)
@@ -162,7 +168,28 @@ enum NativeCaptureHost {
         while true {
             if server.takeStopRequest() || signals.consumeStopRequest() { shouldStop = true }
             if !shouldStop {
-                let failed = workers.filter { !$0.value.isRunning }.map(\.key)
+                if !completedLogs, workers["logs"]?.isRunning == false,
+                   let receipt = try? CaptureLifecycleFiles.read(CaptureWorkerReceipt.self, at: directory.appendingPathComponent("runtime/logs-worker.result.json")),
+                   receipt.exit_code != nil, let logReason = receipt.log_capture?.completion_reason,
+                   (logReason.isLimit && receipt.error == nil || logReason == .identityLost),
+                   (logReason == .identityLost || [0, -SIGINT, 128 + SIGINT].contains(receipt.exit_code ?? 127)) {
+                    completedLogs = true
+                    try updateLogProgress(directory: directory, state: &state, final: true)
+                    if logReason == .identityLost {
+                        var sources = state["sources"]?.object ?? [:]
+                        sources["logs"] = .string("interrupted"); state["sources"] = .object(sources)
+                        state.warn("App identity verification ended device logging. Captured evidence is retained; subsequent network activity has no device-log coverage.")
+                        if !request.capture_network { interrupted = true }
+                    }
+                    try save(state, directory)
+                    if request.capture_network {
+                        state.warn(logReason.isLimit
+                            ? "Device logs stopped at their configured limit. Network is still recording; the remaining interval has no device-log coverage."
+                            : "Network is still recording after device logs stopped. Choose Stop & Save when finished.")
+                        try save(state, directory)
+                    } else { shouldStop = true }
+                }
+                let failed = workers.filter { !$0.value.isRunning && !($0.key == "logs" && completedLogs) }.map(\.key)
                 if !failed.isEmpty {
                     var sources = state["sources"]?.object ?? [:]
                     for source in failed { sources[source] = .string("interrupted") }
@@ -177,6 +204,7 @@ enum NativeCaptureHost {
                 state["recovery_attempt"] = .string(UUID().uuidString)
                 state["routing_restored"] = .null
                 try save(state, directory)
+                try CaptureSaveCoordinator.writeProgress(directory, stage: "restore_connection")
                 do {
                     try await restore(directory: directory, request: request)
                 } catch {
@@ -192,6 +220,7 @@ enum NativeCaptureHost {
                 }
                 state["routing_restored"] = .bool(true)
                 try save(state, directory)
+                try CaptureSaveCoordinator.writeProgress(directory, stage: "stop_collectors")
                 do {
                     let stopped = try await stopWorkers(workers, directory: directory)
                     for warning in stopped { state.warn(warning) }
@@ -223,6 +252,14 @@ enum NativeCaptureHost {
         state["clock_calibration"] = .object(["logs": .object(try await calibration(request: request, tools: discovery.tools)),
             "network": .object(["offset_ms": .number(0), "uncertainty_ms": .number(1), "method": .string("proxy and received timestamps use the Mac clock")])])
         let logCommand = request.capture_logs ? try await logs(request: request, tools: discovery.tools, directory: directory, state: &state) : nil
+        if request.capture_logs {
+            var context = state["context"]?.object ?? [:]
+            let policy = try (request.logging_policy ?? CaptureLoggingPolicy()).validated()
+            var logs: CaptureHostState = ["policy": try stateValue(policy), "collection_state": .string("preparing")]
+            logs["scope"] = try request.log_scope.map { try stateValue($0) } ?? .object(["mode": .string("legacy_unspecified")])
+            context["device_logs"] = .object(logs)
+            state["context"] = .object(context)
+        }
         try save(state, directory)
         if request.capture_network {
             guard let mitmdump = discovery.tools["mitmdump"] else { throw AppError("mitmdump is required for network capture. Install mitmproxy or choose its executable.") }
@@ -272,9 +309,11 @@ enum NativeCaptureHost {
         }
         if let logCommand {
             workers["logs"] = try startWorker(directory: directory, name: "logs", command: logCommand, executable: executable,
-                environment: request.platform == "iphone" ? ["TZ": "UTC", "LC_ALL": "C"] : [:])
+                environment: request.platform == "iphone" ? ["TZ": "UTC", "LC_ALL": "C"] : [:], loggingPolicy: request.logging_policy ?? CaptureLoggingPolicy())
             try await Task.sleep(for: .milliseconds(600))
-            guard workers["logs"]?.isRunning == true else { throw AppError("The device log collector exited during startup. Inspect runtime/logs.stderr.") }
+            let reason = (try? CaptureLifecycleFiles.read(CaptureWorkerReceipt.self, at: directory.appendingPathComponent("runtime/logs-worker.result.json")))?.log_capture?.completion_reason
+            let intentional = reason?.isLimit == true || reason == .identityLost
+            guard workers["logs"]?.isRunning == true || intentional else { throw AppError("The device log collector exited during startup. Inspect runtime/logs.stderr.") }
             var sources = state["sources"]?.object ?? [:]; sources["logs"] = .string("started"); state["sources"] = .object(sources)
         }
         state["phase"] = .string("recording")
@@ -282,9 +321,13 @@ enum NativeCaptureHost {
         try save(state, directory)
     }
 
-    private static func startWorker(directory: URL, name: String, command: [String], executable: URL, environment: [String: String] = [:]) throws -> CaptureOwnedProcess {
+    private static func startWorker(directory: URL, name: String, command: [String], executable: URL, environment: [String: String] = [:], loggingPolicy: CaptureLoggingPolicy? = nil) throws -> CaptureOwnedProcess {
         let output = directory.appendingPathComponent(name == "logs" ? "logs/device.log" : "runtime/mitmdump.stdout")
-        let config = CaptureWorkerConfiguration(command: command, output: output.path, stderr: directory.appendingPathComponent("runtime/\(name).stderr").path, env: environment)
+        let filterURL = directory.appendingPathComponent("runtime/log-filter.json")
+        let filter = name == "logs" && FileManager.default.fileExists(atPath: filterURL.path)
+            ? try CaptureLifecycleFiles.read(CaptureLogFilterConfiguration.self, at: filterURL) : nil
+        let config = CaptureWorkerConfiguration(command: command, output: output.path, stderr: directory.appendingPathComponent("runtime/\(name).stderr").path,
+            env: environment, logging_policy: loggingPolicy, log_filter: filter)
         let configURL = directory.appendingPathComponent("runtime/\(name)-worker.json")
         try CaptureLifecycleFiles.write(config, at: configURL)
         do {
@@ -316,15 +359,37 @@ enum NativeCaptureHost {
     }
 
     private static func finalize(directory: URL, state original: CaptureHostState, startupFailure: Bool = false, interrupted: Bool = false) async throws -> CaptureHostState {
+        do {
+            return try await CaptureSaveCoordinator.run(directory: directory) {
+                try await finishPackage(directory: directory, state: original, startupFailure: startupFailure, interrupted: interrupted)
+            }
+        } catch is CancellationError {
+            var state = try load(directory)
+            state["phase"] = .string("partial")
+            var completeness = state["completeness"]?.object ?? [:]
+            completeness["partial"] = .bool(true)
+            completeness["export_cancelled_by_user"] = .bool(true)
+            state["completeness"] = .object(completeness)
+            state.warn("Save was cancelled after connection restoration and verified collector shutdown. Raw evidence and any prior ZIP are retained. Choose Retry Save to package this session.")
+            try save(state, directory)
+            return state
+        }
+    }
+
+    private static func finishPackage(directory: URL, state original: CaptureHostState, startupFailure: Bool = false, interrupted: Bool = false) async throws -> CaptureHostState {
         var state = original
         var completeness = state["completeness"]?.object ?? [:]
         let startupFailure = startupFailure || completeness["startup_failed"] == .bool(true) || state.text("phase") == "failed"
         let interrupted = interrupted || completeness["interrupted"] == .bool(true)
         state["stopped_at"] = state["stopped_at"] ?? .string(CaptureLifecycleFiles.timestamp())
         state["phase"] = .string("stopping")
+        try updateLogProgress(directory: directory, state: &state, final: true)
         try save(state, directory)
         let index = try NativeTimelineStore(sessionDirectory: directory)
-        let snapshot = try await index.refresh(collectorsStopped: true)
+        let snapshot = try await index.drain(collectorsStopped: true) { progress in
+            try? CaptureSaveCoordinator.writeProgress(directory, stage: "finish_timeline", cancelAllowed: true,
+                indexedBytes: progress.indexedBytes, pendingBytes: max(0, progress.totalBytes - progress.indexedBytes))
+        }
         state["counts"] = .counts(snapshot.counts)
         state["network_diagnostics"] = .counts(snapshot.networkDiagnostics)
         var sources = state["sources"]?.object ?? [:]
@@ -353,10 +418,21 @@ enum NativeCaptureHost {
         completeness["network_errors"] = .counts(["error": requestErrors, "tls_error": tlsErrors])
         completeness["network_attribution"] = .string("Proxy traffic may include other processes; temporal matches are inferred")
         completeness["body_limit"] = .string("No configured body truncation; missing/inflight bodies remain explicit")
+        let deviceLogs = state["context"]?.object["device_logs"]?.object ?? [:]
+        let logReason = deviceLogs.text("completion_reason") ?? ""
+        let logLimited = ["byte_limit", "record_limit", "duration_limit"].contains(logReason)
+        let logGap = (logLimited || logReason == "identity_lost") && state["capture_network"] == .bool(true)
+        let partialTail = (deviceLogs["partial_tail_bytes"] ?? .number(0)) != .number(0)
+        completeness["device_logs"] = .object(deviceLogs.merging(["coverage_ended_before_session_end": .bool(logGap),
+            "partial_tail": .bool(partialTail), "coverage_complete": .bool(!interrupted && !logGap && !partialTail && !["failed", "interrupted"].contains(sources["logs"]?.text ?? "") && !["collector_failure", "write_failure", "identity_lost"].contains(logReason))]) { _, new in new })
         var collectorStatus: [String: CaptureStateValue] = [:]
         for name in ["logs", "network"] {
             if let receipt = try? CaptureLifecycleFiles.read(CaptureHostState.self, at: directory.appendingPathComponent("runtime/\(name)-worker.result.json")) {
                 collectorStatus[name] = .object(receipt)
+                let diagnostic = receipt["diagnostics"]?.object ?? [:]
+                if diagnostic["stdout_overflow_bytes"] != nil && diagnostic["stdout_overflow_bytes"] != .number(0) || diagnostic["stderr_overflow_bytes"] != nil && diagnostic["stderr_overflow_bytes"] != .number(0) {
+                    state.warn("The \(name) collector's diagnostic output reached its limit; overflow counts remain in collector status.")
+                }
                 if case .number(let code) = receipt["exit_code"], ![0, -Double(SIGINT), 128 + Double(SIGINT)].contains(code) {
                     if !["failed", "not_selected"].contains(sources[name]?.text ?? "") { sources[name] = .string("interrupted") }
                     state.warn("The \(name) collector exited abnormally (\(Int(code))). Shutdown was verified, but final evidence may be incomplete.")
@@ -375,18 +451,27 @@ enum NativeCaptureHost {
         }
         let failedSource = sources.values.contains { ["failed", "interrupted"].contains($0.text ?? "") }
         let pending = !(incomplete["flow_ids"]?.array.isEmpty ?? true) || !(incomplete["missing_bodies"]?.array.isEmpty ?? true)
-        let partial = interrupted || failedSource || state["routing_restored"] != .bool(true) || pending || !missing.isEmpty || tlsErrors > 0 || requestErrors > 0
+        let partial = interrupted || failedSource || state["routing_restored"] != .bool(true) || pending || !missing.isEmpty || tlsErrors > 0 || requestErrors > 0 || logGap || partialTail
         completeness["partial"] = .bool(partial || startupFailure)
+        completeness.removeValue(forKey: "export_cancelled_by_user")
+        completeness.removeValue(forKey: "export_failed")
         state["completeness"] = .object(completeness)
         state["phase"] = .string(startupFailure ? "failed" : partial ? "partial" : "saved")
         let timeline = directory.appendingPathComponent("runtime/export-timeline-\(UUID().uuidString).jsonl")
         defer { try? FileManager.default.removeItem(at: timeline) }
         do {
             try await index.exportTimeline(to: timeline)
-            let package = try await CaptureEvidenceExporter().export(sessionDirectory: directory, manifestJSON: state.encodedJSON, normalizedTimeline: timeline)
+            try CaptureSaveCoordinator.writeProgress(directory, stage: "package", cancelAllowed: true)
+            let package = try await CaptureEvidenceExporter().export(sessionDirectory: directory, manifestJSON: state.encodedJSON, normalizedTimeline: timeline) { stage in
+                try CaptureSaveCoordinator.writeProgress(directory, stage: stage.rawValue, cancelAllowed: stage != .publish)
+            }
             state["package_path"] = .string(package.path)
         } catch {
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
             state.warn("Package export failed: \(error.localizedDescription)")
+            var failed = state["completeness"]?.object ?? [:]
+            failed["export_failed"] = .bool(true); failed["partial"] = .bool(true)
+            state["completeness"] = .object(failed)
             state["phase"] = .string(startupFailure ? "failed" : "partial")
         }
         try save(state, directory)
@@ -397,6 +482,37 @@ enum NativeCaptureHost {
         guard directory.path.hasPrefix("/") else { throw AppError("Session directory must be an absolute path.") }
         _ = try CaptureEvidenceFiles(directory: directory)
         return try CaptureLifecycleFiles.read(CaptureHostState.self, at: directory.appendingPathComponent("session.json"))
+    }
+    private static func stateValue(_ value: some Encodable) throws -> CaptureStateValue {
+        try JSONDecoder().decode(CaptureStateValue.self, from: JSONEncoder().encode(value))
+    }
+
+    private static func updateLogProgress(directory: URL, state: inout CaptureHostState, final: Bool) throws {
+        let receipt = try? CaptureLifecycleFiles.read(CaptureWorkerReceipt.self, at: directory.appendingPathComponent("runtime/logs-worker.result.json"))
+        guard let progress = receipt?.log_capture ?? (try? CaptureLifecycleFiles.read(CaptureLogProgress.self, at: directory.appendingPathComponent("runtime/logs-worker.progress.json"))) else { return }
+        var context = state["context"]?.object ?? [:]
+        var logs = context["device_logs"]?.object ?? [:]
+        logs.merge(try stateValue(progress).object) { _, new in new }
+        logs["coverage_started_at"] = .string(progress.started_at)
+        logs["coverage_ended_at"] = progress.ended_at.map(CaptureStateValue.string) ?? .null
+        let verified = receipt?.exit_code != nil
+        logs["shutdown_verified"] = .bool(verified)
+        logs["collection_state"] = .string(progress.completion_reason == nil ? "recording" : verified ? "stopped" : "stopping")
+        if let reason = progress.completion_reason, final, logs["status_event_emitted"] != .bool(true) {
+            let summary = reason.isLimit ? "Device logs stopped — configured \(reason.rawValue.replacingOccurrences(of: "_", with: " ")) reached" : "Device logs stopped — \(reason.rawValue.replacingOccurrences(of: "_", with: " "))"
+            let timestamp = progress.ended_at ?? progress.updated_at
+            let event: CaptureHostState = ["id": .string("capture-status-logs-\(state.text("id") ?? UUID().uuidString)"),
+                "timestamp": .string(timestamp), "original_timestamp": .string(timestamp), "received_at": .string(timestamp),
+                "source": .string("marker"), "kind": .string("capture_status"), "summary": .string(summary), "clock_uncertainty_ms": .number(1),
+                "detail": .object(["origin": .string("companion"), "source": .string("logs"), "completion_reason": .string(reason.rawValue),
+                    "shutdown_verified": .bool(verified), "log_capture": try stateValue(progress)])]
+            var bytes = try event.encodedJSON; bytes.append(10)
+            try NativeTimelineFiles(directory: directory).appendMarker(bytes)
+            logs["status_event_emitted"] = .bool(true)
+            if reason.isLimit { state.warn(summary + ". Earlier device-log evidence is retained.") }
+        }
+        context["device_logs"] = .object(logs)
+        state["context"] = .object(context)
     }
     private static func save(_ state: CaptureHostState, _ directory: URL) throws { try CaptureLifecycleFiles.write(state, at: directory.appendingPathComponent("session.json")) }
     private static func markSelectedFailed(_ state: inout CaptureHostState) {

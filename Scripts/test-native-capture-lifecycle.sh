@@ -7,6 +7,8 @@ mkdir -p "$work/Sources/NativeCaptureLifecycle" "$work/Tests/NativeCaptureLifecy
 cp Sources/Core/Support.swift Sources/Core/Shell/ShellRunner.swift Sources/Core/CaptureModels.swift \
   Sources/Core/Capture/*.swift Sources/Core/CaptureServices/*.swift Sources/Core/CaptureLifecycle/*.swift "$work/Sources/NativeCaptureLifecycle/"
 cp Tests/NativeCaptureLifecycleTests.swift "$work/Tests/NativeCaptureLifecycleTests/"
+cp Tests/CaptureSaveCoordinatorTests.swift "$work/Tests/NativeCaptureLifecycleTests/"
+cp Tests/CaptureLogWorkerTests.swift "$work/Tests/NativeCaptureLifecycleTests/"
 swiftc -swift-version 6 -warnings-as-errors -parse-as-library \
   "$work"/Sources/NativeCaptureLifecycle/*.swift Sources/CaptureHost/MobileCaptureHostMain.swift -o "$work/mobile-capture-host"
 cat > "$work/fixture-tool.swift" <<'SWIFT'
@@ -45,6 +47,43 @@ if kind == "adb" {
     if arguments == ["devices", "-l"] { text("List of devices attached\nfixture-device device model:Fixture_Phone"); exit(0) }
     guard arguments.prefix(2) == ["-s", "fixture-device"] else { fail("Unexpected device selection") }
     let args = Array(arguments.dropFirst(2))
+    if let mode = readJSON("faults.json")["app_scope_mode"] as? String {
+        let package = "codePath=/data/app/verified\nfirstInstallTime=2026-01-01 00:00:00\nlastUpdateTime=2026-01-01 00:00:00"
+        if args == ["shell", "am", "get-current-user"] { text("0"); exit(0) }
+        if args.prefix(4) == ["shell", "pm", "list", "packages"] { text("package:dev.mobilecapture.fixture uid:10123"); exit(0) }
+        if args == ["shell", "dumpsys", "package", "dev.mobilecapture.fixture"] { text(package); exit(0) }
+        if args == ["shell", "logcat", "--help"] { text(mode == "pid" ? "logcat basic" : "logcat --uid UID"); exit(0) }
+        if args.first == "logcat", args.contains("-d") { exit(0) }
+        if args.count == 2, args[0] == "shell", args[1].contains("__MC_FENCE__") {
+            if mode == "identity_denied" { fail("Synthetic identity metadata denied") }
+            let now = Date().timeIntervalSince1970
+            text("__MC_FENCE__\n\(now)\n__MC_USER__\n0\n__MC_PACKAGES__\npackage:dev.mobilecapture.fixture uid:10123\n__MC_PACKAGE__")
+            text(mode == "identity_loss" && FileManager.default.fileExists(atPath: root.appendingPathComponent("app-reinstalled").path) ? package.replacingOccurrences(of: "/verified", with: "/reinstalled") : package)
+            if args[1].contains("__MC_CLOCK__") {
+                text("__MC_CLOCK__\n\(now)\n100.0 100.0\n\(now + 0.001)\n100\n__MC_PS__\nPID UID NAME\n41 10123 dev.mobilecapture.fixture\n52 10123 dev.mobilecapture.fixture:ads\n__MC_DETAILS__")
+                for (pid, name) in [(41, "dev.mobilecapture.fixture"), (52, "dev.mobilecapture.fixture:ads")] {
+                    let stat = "\(pid) (\(name)) " + (["S"] + Array(repeating: "0", count: 18) + ["1000"]).joined(separator: " ")
+                    text("__MC_PID_\(pid)\n\(stat)\nUid:\t10123 10123 10123 10123\n\(name)")
+                }
+            }
+            text("__MC_END__"); exit(0)
+        }
+        if args.first == "logcat" {
+            let epoch = Date().timeIntervalSince1970
+            text("\(epoch) 41 42 D Ads: repeated SDK debug message")
+            text("SDK continuation")
+            text("\(epoch) 41 42 D Ads: repeated SDK debug message")
+            text("\(epoch) 52 53 V Ads: helper after process restart")
+            if mode == "pid" { text("\(epoch) 99 99 I Other: must never persist") }
+            if mode == "unverified_tail" { text("\(epoch + 3600) 41 42 D Ads: outside verified time fence") }
+            if mode == "identity_loss" {
+                usleep(700_000)
+                try! Data("changed".utf8).write(to: root.appendingPathComponent("app-reinstalled"))
+                text("\(Date().timeIntervalSince1970 + 3600) 41 42 D Ads: unverified after reinstall")
+            }
+            waitWithSignal { try! Data("logs stopped".utf8).write(to: root.appendingPathComponent("logs-stopped")) }
+        }
+    }
     if args.prefix(1) == ["logcat"] {
         text("\(Date().timeIntervalSince1970) 1 2 I Fixture: native device log")
         waitWithSignal { try! Data("logs stopped".utf8).write(to: root.appendingPathComponent("logs-stopped")) }

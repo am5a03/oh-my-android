@@ -69,6 +69,8 @@ struct NativeCaptureRequest: Codable, Sendable {
     var ideviceinfo_path: String?
     var iphone_endpoint_host: String?
     var iphone_tunnel_directory: String?
+    var logging_policy: CaptureLoggingPolicy?
+    var log_scope: CaptureLogScope?
 }
 
 struct CaptureHostEnvelope: Codable, Sendable {
@@ -86,10 +88,14 @@ struct CaptureWorkerConfiguration: Codable, Sendable {
     let output: String
     let stderr: String
     var env: [String: String] = [:]
+    var logging_policy: CaptureLoggingPolicy?
+    var log_filter: CaptureLogFilterConfiguration?
 }
 
 struct CaptureWorkerReceipt: Codable, Sendable {
     let exit_code: Int32?
     let finished_at: String
     var error: String?
+    var log_capture: CaptureLogProgress?
+    var diagnostics: CaptureWorkerDiagnostics?
 }

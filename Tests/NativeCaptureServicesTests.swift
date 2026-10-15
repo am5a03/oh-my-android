@@ -226,6 +226,26 @@ struct NativeCaptureServicesTests {
         #expect(try Data(contentsOf: output.appendingPathComponent("timeline/markers.jsonl")) == Data(contentsOf: journal))
     }
 
+    @Test(arguments: [CaptureEvidenceExportStage.validateEvidence, .package, .publish])
+    func cancellingAtSaveStagesPreservesPriorZip(_ cancellationStage: CaptureEvidenceExportStage) async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        try fixture.populate()
+        let prior = Data("prior verified package".utf8)
+        let destination = fixture.session.appendingPathComponent("capture-package.zip")
+        try prior.write(to: destination)
+        await #expect(throws: CancellationError.self) {
+            try await CaptureEvidenceExporter().export(sessionDirectory: fixture.session,
+                manifestJSON: fixture.manifest(), normalizedTimeline: fixture.timeline) { stage in
+                if stage == cancellationStage { throw CancellationError() }
+            }
+        }
+        #expect(try Data(contentsOf: destination) == prior)
+        let names = try FileManager.default.contentsOfDirectory(atPath: fixture.session.path)
+        #expect(!names.contains { $0.hasPrefix(".native-export-") })
+        #expect(FileManager.default.fileExists(atPath: fixture.session.appendingPathComponent("logs/device.log").path))
+    }
+
     @Test(arguments: ["logs/device.log", "network", "timeline/markers.jsonl", "capture-package.zip"])
     func exporterRejectsSymlinksAndKeepsPriorPackage(_ relative: String) async throws {
         let fixture = try Fixture()

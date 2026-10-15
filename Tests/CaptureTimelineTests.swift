@@ -6,6 +6,17 @@ import Foundation
 struct CaptureTimelineTests {
     @MainActor
     static func main() async throws {
+        let settings = CaptureStore()
+        try require(!settings.captureLogs, "device logging is opt-in")
+        settings.targetApp = "dev.example.first"
+        settings.logExecutableOverride = "FirstApp"
+        settings.logHelpers = "FirstHelper"
+        settings.targetApp = "dev.example.second"
+        try require(settings.logExecutableOverride.isEmpty && settings.logHelpers.isEmpty, "changing apps cannot reuse another app's process override")
+        settings.logExecutableOverride = "SecondApp"
+        settings.logHelpers = "SecondHelper"
+        settings.selectedDeviceID = "android:unavailable-synthetic-device"
+        try require(settings.logExecutableOverride.isEmpty && settings.logHelpers.isEmpty && settings.targetApp.isEmpty, "changing devices resets process configuration")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("capture-timeline-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("network"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("logs"), withIntermediateDirectories: true)
@@ -142,6 +153,33 @@ struct CaptureTimelineTests {
         state["phase"] = "saved"
         try JSONSerialization.data(withJSONObject: state).write(to: directory.appendingPathComponent("session.json"), options: .atomic)
         try await wait { store.session?.isActive == false }
+
+        let append = try FileHandle(forWritingTo: directory.appendingPathComponent("logs/device.log"))
+        try append.seekToEnd(); try append.write(contentsOf: rawLogs); try append.close()
+        let imported = CaptureStore()
+        await imported.loadSession(at: directory)
+        try require(imported.pendingTimelineBytes > 0, "saved-session imports remain bounded")
+        imported.toggleBackgroundIndexing()
+        try require(imported.isIndexingPaused, "saved-session indexing can be paused")
+        let retainedCount = imported.timeline?.totalCount
+        imported.sourceFilter = "network"
+        try await wait { imported.timelineMatchesFilters && !imported.isLoadingTimeline }
+        imported.search = "synthetic"
+        try await wait { imported.timelineMatchesFilters && !imported.isLoadingTimeline }
+        try require(imported.timeline?.totalCount == retainedCount && imported.pendingTimelineBytes > 0, "filters do not ingest additional records while indexing is paused")
+        imported.toggleBackgroundIndexing()
+        try await wait { imported.pendingTimelineBytes == 0 }
+        try require(imported.session?.counts["logs"] == 12_000, "resuming indexes the retained raw backlog")
+
+        let unreadable = directory.appendingPathComponent("unopenable-session")
+        try FileManager.default.createDirectory(at: unreadable.appendingPathComponent("runtime/native-timeline/compact-v3.sqlite"), withIntermediateDirectories: true)
+        state["id"] = "unopenable-test"; state["directory"] = unreadable.path
+        try JSONSerialization.data(withJSONObject: state).write(to: unreadable.appendingPathComponent("session.json"))
+        await imported.loadSession(at: unreadable)
+        try require(imported.error != nil && imported.timeline == nil && imported.events.isEmpty, "failed cache attachment detaches the previous session's index")
+        imported.search = "another filter"
+        try await Task.sleep(for: .milliseconds(250))
+        try require(imported.session?.id == "unopenable-test" && imported.timeline == nil, "an obsolete session cannot overwrite failed-open metadata")
     }
 
     @MainActor

@@ -72,12 +72,17 @@ struct CaptureView: View {
                 .help("Show the saved ZIP or capture certificate in Finder.")
             }
             ToolbarItem(placement: .status) {
-                if store.isBusy {
+                if store.isBusy || store.isSaving {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.small)
                         Text(operationTitle).font(.caption)
                     }
                     .accessibilityElement(children: .combine)
+                    if store.canCancelSave || store.isCancellingSave {
+                        Button(store.isCancellingSave ? "Cancelling…" : "Cancel Save") { Task { await store.cancelSave() } }
+                            .disabled(!store.canCancelSave)
+                            .help("Cancel packaging after collectors stop. Original evidence and any prior ZIP are retained; Retry Save remains available.")
+                    }
                 }
             }
             ToolbarItem(placement: .primaryAction) {
@@ -231,6 +236,7 @@ struct CaptureView: View {
         guard let device = store.selectedDevice else { return "Choose a connected device to start capturing." }
         if !device.isReady { return "The selected device is not ready. Unlock it, authorize the computer, then refresh devices." }
         if device.platform == "iphone", store.captureLogs, store.toolPath("idevicesyslog") == nil { return "Install libimobiledevice for USB iPhone logs, then Refresh. Network capture can run without device logs." }
+        if store.captureLogs, let issue = store.logConfigurationIssue { return issue }
         if store.captureNetwork && device.platform == "iphone" && store.iphoneTunnelConfiguration == nil { return "Choose Set Up iPhone Capture to prepare the private WireGuard tunnel, then start recording." }
         if !store.captureLogs && !store.captureNetwork { return "Select Device Logs, Network Requests & Responses, or both." }
         if store.captureNetwork && device.platform == "simulator" && store.networkService.isEmpty {
@@ -260,7 +266,7 @@ struct CaptureView: View {
 
     private var operationTitle: String {
         if store.isStarting { return "Preparing capture…" }
-        if store.isStopping { return store.session?.needsRoutingRecovery == true ? "Restoring connection and saving…" : "Stopping and saving…" }
+        if store.isSaving { return store.saveStageTitle }
         return "Updating session…"
     }
 
@@ -322,19 +328,14 @@ struct CaptureView: View {
             HStack(spacing: 20) {
                 Toggle("Device logs", isOn: $store.captureLogs)
                 Toggle("Network requests & responses", isOn: $store.captureNetwork)
-                TextField("Optional app bundle identifier", text: $store.targetApp)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 350)
-                    .help("On Simulator, limits logs to the installed app’s process across restarts. On Android, records investigation context while retaining all device logs.")
                 Spacer()
             }
             .disabled(store.hasActiveCapture || store.isBusy)
-            Text(store.selectedDevice?.platform == "iphone"
-                 ? "iPhone logs use USB. Network traffic uses the private WireGuard tunnel over Wi-Fi. The optional app identifier is investigation context; other apps can be included."
-                 : store.selectedDevice?.platform == "simulator"
-                 ? "Enter an installed app’s bundle identifier to focus Simulator logs. An empty field captures all processes. Network capture can include other apps; some SDK traffic may remain unreadable."
-                 : "Android retains all device logs; app context is metadata. Network capture can include other apps; some SDK traffic may remain unreadable.")
-                .font(.caption).foregroundStyle(.secondary)
+            if store.captureLogs { CaptureLogSettingsView(store: store) }
+            if store.selectedDevice?.platform == "iphone" {
+                Text("iPhone logs use USB. Network traffic uses the private WireGuard tunnel over Wi-Fi.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if store.selectedDevice?.platform == "iphone" {
                 if store.captureLogs, store.toolPath("idevicesyslog") == nil {
                     Text("USB logs require libimobiledevice (brew install libimobiledevice). Install it once, unlock and trust this Mac on iPhone, then Refresh.")
@@ -413,6 +414,7 @@ struct CaptureView: View {
     }
 
     private var sessionStatus: some View {
+        VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: 18) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(phaseTitle).font(.headline)
@@ -437,11 +439,13 @@ struct CaptureView: View {
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
+        CaptureLogVolumeView(store: store)
+        }
     }
 
     private var phaseTitle: String {
         if store.isStarting { return "Preparing Capture…" }
-        if store.isStopping { return store.session?.needsRoutingRecovery == true ? "Restoring Connection & Saving…" : "Stopping & Saving…" }
+        if store.isSaving { return store.saveStageTitle }
         guard let session = store.session else { return "Ready to Capture" }
         if session.needsRoutingRecovery { return "Connection Needs Recovery" }
         return switch session.phase {
@@ -457,8 +461,11 @@ struct CaptureView: View {
 
     private func sourceStatus(_ title: String, source: String) -> some View {
         let status = store.session?.sources[source] ?? "not_selected"
-        let color: Color = status == "observed" ? .green : (["failed", "interrupted", "tls_failed"].contains(status) ? .red : (status == "started" ? .blue : .secondary))
-        let statusTitle = switch status {
+        let logReason = source == "logs" ? store.deviceLogProgress?.completion_reason : nil
+        let color: Color = logReason?.isLimit == true ? .orange : status == "observed" ? .green : (["failed", "interrupted", "tls_failed"].contains(status) ? .red : (status == "started" ? .blue : .secondary))
+        let statusTitle: String
+        if let logReason { statusTitle = logReason.isLimit ? "Limit Reached" : "Stopped" }
+        else { statusTitle = switch status {
         case "observed": store.session?.isActive == true ? "Receiving" : "Captured"
         case "started": store.session?.isActive == true ? "Waiting for Events" : "No Events Captured"
         case "preparing": "Preparing"
@@ -467,6 +474,7 @@ struct CaptureView: View {
         case "tls_failed": "Check Certificate Trust"
         case "not_selected": "Not Selected"
         default: "Status Unavailable"
+        }
         }
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 5) {
@@ -488,6 +496,7 @@ struct CaptureView: View {
                     Text("Logs").tag("logs")
                     Text("Network").tag("network")
                     Text("Markers").tag("marker")
+                    Text("Capture Status").tag("status")
                 }
                 .labelsHidden().frame(width: 140)
                 TextField("Filter URL, message, kind or detail…", text: $store.search)
@@ -510,6 +519,10 @@ struct CaptureView: View {
             HStack(spacing: 10) {
                 Text(store.timelineCountText).monospacedDigit()
                 if store.isLoadingTimeline { ProgressView().controlSize(.small) }
+                if store.pendingTimelineBytes > 0, store.session?.isActive != true {
+                    Button(store.isIndexingPaused ? "Resume Indexing" : "Pause Indexing") { store.toggleBackgroundIndexing() }
+                        .help("Pause rebuilding the disposable timeline cache. Original evidence is retained; remaining records become searchable when indexing resumes.")
+                }
                 if store.hasOlderEvents {
                     Button("Load Older") { Task { await store.loadOlderEvents() } }
                         .disabled(store.isBusy || store.isLoadingTimeline)

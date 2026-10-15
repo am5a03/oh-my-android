@@ -28,6 +28,8 @@ private struct CaptureStartRequest: Encodable {
     let proxyHelperPath: String?
     let runtimeDirectory: String?
     let iphoneEndpointHost: String?
+    let loggingPolicy: CaptureLoggingPolicy?
+    let logScope: CaptureLogScope?
 }
 
 /// The app talks to a compiled sibling helper. JSON carries session metadata, never captured bodies.
@@ -85,13 +87,43 @@ final class CaptureStore {
     private(set) var presentationHint: String?
     private(set) var pendingTimelineBytes: Int64 = 0
     private(set) var followLatest = true
+    private(set) var applications: [CaptureLogApplication] = []
+    private(set) var isLoadingApplications = false
+    private(set) var applicationDiscoveryError: String?
+    private(set) var deviceLogProgress: CaptureLogProgress?
+    private(set) var networkEvidenceBytes: Int64 = 0
+    private(set) var rawEvidenceBytes: Int64 = 0
+    private(set) var timelineCacheBytes: Int64 = 0
+    private(set) var availableDiskBytes: Int64?
+    private(set) var saveProgress: CaptureSaveProgress?
+    private(set) var isCancellingSave = false
+    private(set) var isIndexingPaused = false
     var wrapLines = false
     var selectedDeviceID = "" {
-        didSet { if selectedDeviceID != oldValue { loadIPhoneSetup() } }
+        didSet {
+            if selectedDeviceID != oldValue {
+                logScopeMode = .app
+                targetApp = ""
+                logHelpers = ""; logExecutableOverride = ""
+                applications = []
+                loadIPhoneSetup()
+                Task { await refreshApplications() }
+            }
+        }
     }
-    var captureLogs = true
+    var captureLogs = false
     var captureNetwork = true
-    var targetApp = ""
+    var targetApp = "" {
+        didSet {
+            if targetApp != oldValue { logHelpers = ""; logExecutableOverride = "" }
+        }
+    }
+    var logScopeMode: CaptureLogScope.Mode = .app
+    var logHelpers = ""
+    var logExecutableOverride = ""
+    var logLimitMB = 200
+    var logLimitRecords = 250_000
+    var logLimitMinutes = 10
     var networkService = ""
     var trustSimulatorCA = false
     var adbPath = ""
@@ -124,6 +156,9 @@ final class CaptureStore {
     @ObservationIgnored private var windowHasOlder = false
     @ObservationIgnored private var windowHasNewer = false
     @ObservationIgnored private var heldMatchingCount: Int?
+    @ObservationIgnored private var applicationRequest = UUID()
+    @ObservationIgnored private var timelineOperation: Task<Void, Never>?
+    @ObservationIgnored private var timelineOperationID = UUID()
 
     init(hostExecutable: URL? = nil) {
         self.hostExecutable = hostExecutable
@@ -138,6 +173,7 @@ final class CaptureStore {
             && !(captureNetwork && selectedDevice?.platform == "simulator" && networkService.isEmpty)
             && !(captureNetwork && selectedDevice?.platform == "iphone" && iphoneTunnelConfiguration == nil)
             && !(captureLogs && selectedDevice?.platform == "iphone" && toolPath("idevicesyslog") == nil)
+            && (!captureLogs || logConfigurationIssue == nil)
     }
     // The retained window is chronological; reversing never changes the user's following preference.
     var visibleEvents: [NativeTimelineRow] {
@@ -152,7 +188,7 @@ final class CaptureStore {
     var timelineCountText: String {
         guard timelineMatchesFilters, let timeline else { return session == nil ? "0 events" : "Loading matching events…" }
         return "\(events.count) shown · \(timeline.matchingCount) matching · \(timeline.totalCount) "
-            + (pendingTimelineBytes > 0 ? "indexed · Indexing saved evidence…" : "captured")
+            + (pendingTimelineBytes > 0 ? "indexed · \(isIndexingPaused ? "Indexing paused" : "Indexing saved evidence…")" : "captured")
     }
     var activeTargetName: String {
         if isStarting { return selectedDevice?.name ?? "Preparing selected device" }
@@ -163,6 +199,69 @@ final class CaptureStore {
     }
 
     func toolPath(_ name: String) -> String? { tools[name] ?? nil }
+
+    var selectedApplication: CaptureLogApplication? { applications.first { $0.id == targetApp } }
+
+    var logConfigurationIssue: String? {
+        guard (1...200).contains(logLimitMB), (1...250_000).contains(logLimitRecords), (1...10).contains(logLimitMinutes) else {
+            return "Choose log limits of 1–200 MB, 1–250,000 records and 1–10 minutes."
+        }
+        guard logScopeMode == .app else { return nil }
+        guard nonempty(targetApp) != nil else { return "Choose the app whose logs you want to capture." }
+        if selectedDevice?.platform == "iphone",
+           (selectedApplication?.executable == nil || selectedApplication?.executableIsAmbiguous == true),
+           nonempty(logExecutableOverride) == nil {
+            return "This app’s executable could not be verified. Ask an engineer to enter its executable name in Advanced Logging."
+        }
+        return nil
+    }
+
+    private var requestedLogPolicy: CaptureLoggingPolicy {
+        let bytes = Int64(logLimitMB) * 1_000_000, records = Int64(logLimitRecords)
+        let seconds = Double(logLimitMinutes * 60)
+        return CaptureLoggingPolicy(max_bytes: bytes, max_records: records, max_duration_seconds: seconds,
+            warning_bytes: min(100_000_000, max(1, bytes * 4 / 5)),
+            warning_records: min(200_000, max(1, records * 4 / 5)),
+            warning_duration_seconds: min(480, max(1, seconds * 0.8)))
+    }
+
+    var saveStageTitle: String {
+        switch saveProgress?.stage {
+        case "restore_connection": "Restoring Connection…"
+        case "stop_collectors": "Stopping Collectors…"
+        case "finish_timeline": "Finishing Timeline…"
+        case "validate_evidence": "Validating Evidence…"
+        case "package": "Creating ZIP…"
+        case "publish": "Saving ZIP…"
+        case "cancelled": "Save Cancelled · Raw Evidence Retained"
+        case "needs_retry": "Save Needs Retry"
+        case "saved": "Capture Saved"
+        default: isSaving ? "Restoring Connection…" : "Capture Session"
+        }
+    }
+
+    var canCancelSave: Bool {
+        session?.phase == "stopping" && session?.routingRestored == true && saveProgress?.cancel_allowed == true && !isCancellingSave
+    }
+
+    var isSaving: Bool { isStopping || (session?.phase == "stopping" && session?.routingRestored != false) }
+
+    func refreshApplications() async {
+        guard !hasActiveCapture, let device = selectedDevice, device.isReady else { return }
+        let request = UUID(), selection = selectedDeviceID
+        applicationRequest = request
+        isLoadingApplications = true
+        applicationDiscoveryError = nil
+        defer { if applicationRequest == request { isLoadingApplications = false } }
+        do {
+            let found = try await CaptureLogDiscovery().applications(device: device, tools: tools.compactMapValues { $0 })
+            guard applicationRequest == request, selectedDeviceID == selection, !hasActiveCapture else { return }
+            applications = found
+        } catch {
+            guard applicationRequest == request, selectedDeviceID == selection else { return }
+            applicationDiscoveryError = error.localizedDescription
+        }
+    }
 
     func loadIPhoneSetup() {
         guard !hasActiveCapture else { return }
@@ -203,6 +302,7 @@ final class CaptureStore {
             if !networkServices.contains(networkService) { networkService = "" }
             if !discovery.warnings.isEmpty { error = discovery.warnings.joined(separator: "\n") }
             loadIPhoneSetup()
+            await refreshApplications()
         } catch { recordFailure(error) }
     }
 
@@ -226,6 +326,7 @@ final class CaptureStore {
         error = nil
         defer { isBusy = false }
         do {
+            session = try await Self.readMetadata(directory)
             try attachIndex(directory)
             await refreshTimeline(mode: .latest)
             guard let session, URL(fileURLWithPath: session.directory).standardizedFileURL == directory.standardizedFileURL else { return }
@@ -241,6 +342,9 @@ final class CaptureStore {
             }
             beginPolling()
         } catch {
+            pollingTask?.cancel(); timelineTask?.cancel(); timelineOperation?.cancel(); detailTask?.cancel()
+            index = nil; sessionToken = UUID()
+            events = []; timeline = nil; selectedEventID = nil; selectedEvent = nil
             recordFailure(error)
             self.error = "Could not open session at \(directory.path):\n\(self.error ?? error.localizedDescription)"
         }
@@ -251,9 +355,14 @@ final class CaptureStore {
         isBusy = true
         isStarting = true
         error = nil
-        defer { isBusy = false; isStarting = false }
+        defer { isBusy = false; isStarting = false; if session?.isActive != true { logScopeMode = .app } }
         do {
             try FileManager.default.createDirectory(at: outputRoot, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let available = try? outputRoot.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage
+            let reserve = captureLogs ? requestedLogPolicy.max_bytes * 4 + 64_000_000 : 256_000_000
+            if let available, available < reserve {
+                throw AppError("Free at least \(ByteCountFormatter.string(fromByteCount: reserve, countStyle: .file)) for capture and save staging, or choose another capture folder. Full network bodies can need additional space.")
+            }
             let request = CaptureStartRequest(platform: device.platform, deviceId: device.id, deviceName: device.name,
                 captureLogs: captureLogs, captureNetwork: captureNetwork, outputRoot: outputRoot.path,
                 targetApp: nonempty(targetApp), networkService: device.platform == "simulator" ? nonempty(networkService) : nil,
@@ -261,7 +370,11 @@ final class CaptureStore {
                 adbPath: nonempty(adbPath), mitmdumpPath: nonempty(mitmdumpPath),
                 proxyHelperPath: Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("mobile-capture-proxy").path,
                 runtimeDirectory: Bundle.main.resourceURL?.appendingPathComponent("CaptureRuntime").path,
-                iphoneEndpointHost: device.platform == "iphone" ? iphoneTunnelConfiguration?.endpointHost : nil)
+                iphoneEndpointHost: device.platform == "iphone" ? iphoneTunnelConfiguration?.endpointHost : nil,
+                loggingPolicy: captureLogs ? requestedLogPolicy : nil,
+                logScope: captureLogs ? CaptureLogScope(mode: logScopeMode, applicationID: nonempty(targetApp),
+                    helperProcessNames: logHelpers.split(separator: ",").compactMap { nonempty(String($0)) },
+                    executableOverride: nonempty(logExecutableOverride)) : nil)
             let requestURL = outputRoot.appendingPathComponent(".start-\(UUID().uuidString).json")
             let encoder = JSONEncoder()
             encoder.keyEncodingStrategy = .convertToSnakeCase
@@ -284,6 +397,7 @@ final class CaptureStore {
                     // A failed startup can still own routing. Never let an old index replace that session.
                     index = nil; pollingTask?.cancel(); pollingTask = nil
                     timelineTask?.cancel(); detailTask?.cancel(); sessionToken = UUID()
+                    timelineOperation?.cancel()
                     events = []; timeline = nil; selectedEventID = nil; selectedEvent = nil
                     self.error? += "\nTimeline unavailable: \(error.localizedDescription)"
                 }
@@ -304,16 +418,44 @@ final class CaptureStore {
         }
         pollingTask?.cancel()
         pollingTask = nil
+        timelineTask?.cancel(); timelineOperation?.cancel()
         isBusy = true
         isStopping = true
-        defer { isStopping = false; isBusy = false; beginPolling() }
+        saveProgress = CaptureSaveProgress(stage: "restore_connection")
+        let token = sessionToken
+        let monitor = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+                guard let self, self.sessionToken == token else { return }
+                if let metadata = try? await Self.readMetadata(URL(fileURLWithPath: current.directory)) {
+                    let volume = await Self.readVolume(URL(fileURLWithPath: current.directory))
+                    guard !Task.isCancelled, self.sessionToken == token else { return }
+                    self.session = metadata
+                    self.saveProgress = volume.saveProgress
+                    self.deviceLogProgress = volume.progress
+                }
+            }
+        }
+        defer {
+            monitor.cancel(); isStopping = false; isBusy = false; isCancellingSave = false
+            if session?.isActive != true { logScopeMode = .app }
+            beginPolling()
+        }
         while isAddingMarker { try? await Task.sleep(for: .milliseconds(20)) }
         error = nil
         do {
-            let update: CaptureUpdate = try await client.call([needsPhoneConfirmation ? "stop-iphone-tunnel-off" : "stop", "--session", current.directory], timeout: .seconds(120))
+            let update: CaptureUpdate = try await client.call([needsPhoneConfirmation ? "stop-iphone-tunnel-off" : "stop", "--session", current.directory], timeout: .seconds(900))
             session = update.session
             await refreshTimeline(mode: .presentation)
         } catch { recordFailure(error) }
+    }
+
+    func cancelSave() async {
+        guard canCancelSave, let current = session else { return }
+        isCancellingSave = true
+        do {
+            let _: CaptureUpdate = try await client.call(["cancel-save", "--session", current.directory])
+        } catch { isCancellingSave = false; recordFailure(error) }
     }
 
     func addMarker() async {
@@ -388,6 +530,54 @@ final class CaptureStore {
     }
 
     private var client: CaptureRuntimeClient { CaptureRuntimeClient(executableOverride: hostExecutable) }
+
+    @concurrent
+    private static func readMetadata(_ directory: URL) async throws -> CaptureSession {
+        let url = directory.appendingPathComponent("session.json")
+        let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+        guard values.isRegularFile == true, (values.fileSize ?? Int.max) <= 4 * 1024 * 1024 else {
+            throw AppError("The capture metadata is unavailable or exceeds the supported size.")
+        }
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode(CaptureSession.self, from: Data(contentsOf: url))
+    }
+
+    private struct Volume: Sendable {
+        var progress: CaptureLogProgress?
+        var saveProgress: CaptureSaveProgress?
+        var network: Int64 = 0
+        var raw: Int64 = 0
+        var cache: Int64 = 0
+        var available: Int64?
+    }
+
+    @concurrent
+    private static func readVolume(_ directory: URL) async -> Volume {
+        var result = Volume()
+        result.available = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage
+        let saveURL = directory.appendingPathComponent("runtime/save-progress.json")
+        if let size = try? saveURL.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 1024 * 1024,
+           let data = try? Data(contentsOf: saveURL) {
+            result.saveProgress = try? JSONDecoder().decode(CaptureSaveProgress.self, from: data)
+        }
+        let progressURL = directory.appendingPathComponent("runtime/logs-worker.progress.json")
+        if let size = try? progressURL.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 1024 * 1024,
+           let data = try? Data(contentsOf: progressURL) {
+            result.progress = try? JSONDecoder().decode(CaptureLogProgress.self, from: data)
+        }
+        func size(_ path: String) -> Int64 {
+            Int64((try? directory.appendingPathComponent(path).resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
+        for path in ["network/events.jsonl", "network/capture.har", "network/capture.mitm", "network/incomplete.json"] {
+            result.network += size(path)
+        }
+        result.raw = result.network + size("logs/device.log") + size("timeline/markers.jsonl")
+        for name in ["compact-v3.sqlite", "index.sqlite"] {
+            for suffix in ["", "-wal", "-shm"] { result.cache += size("runtime/native-timeline/" + name + suffix) }
+        }
+        return result
+    }
+
     private func nonempty(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
@@ -403,6 +593,7 @@ final class CaptureStore {
         let newIndex = try NativeTimelineStore(sessionDirectory: directory)
         pollingTask?.cancel()
         timelineTask?.cancel()
+        timelineOperation?.cancel()
         detailTask?.cancel()
         sessionToken = UUID()
         queryRevision &+= 1
@@ -413,19 +604,23 @@ final class CaptureStore {
         hiddenThroughSequence = nil; pauseThroughSequence = nil; isViewPaused = false
         heldMatchingCount = nil; followLatest = true; presentationHint = nil; markerReceipt = nil
         pendingTimelineBytes = 0
+        deviceLogProgress = nil; networkEvidenceBytes = 0; rawEvidenceBytes = 0; timelineCacheBytes = 0
+        saveProgress = nil; isCancellingSave = false
+        isIndexingPaused = false
         // Query changes are scheduled only once the new index is installed.
         search = ""; sourceFilter = "all"
     }
 
     private func beginPolling() {
         pollingTask?.cancel()
-        guard session?.isActive == true else { pollingTask = nil; return }
+        guard session?.isActive == true || (pendingTimelineBytes > 0 && !isIndexingPaused) else { pollingTask = nil; return }
         let token = sessionToken
         pollingTask = Task { [weak self] in
             while !Task.isCancelled {
                 let delay: Duration = (self?.pendingTimelineBytes ?? 0) > 0 ? .milliseconds(100) : .seconds(2)
                 do { try await Task.sleep(for: delay) } catch { return }
-                guard let self, token == self.sessionToken, self.session?.isActive == true else { return }
+                guard let self, token == self.sessionToken,
+                      self.session?.isActive == true || (self.pendingTimelineBytes > 0 && !self.isIndexingPaused) else { return }
                 await self.refreshTimeline(mode: .poll)
             }
         }
@@ -458,6 +653,7 @@ final class CaptureStore {
     private func scheduleTimelineRefresh() {
         queryRevision &+= 1
         timelineTask?.cancel()
+        timelineOperation?.cancel()
         guard index != nil else { return }
         isLoadingTimeline = true
         timelineTask = Task { [weak self] in
@@ -477,6 +673,24 @@ final class CaptureStore {
     }
 
     private func refreshTimeline(mode: RefreshMode) async {
+        if mode == .poll, timelineOperation != nil { return }
+        if mode != .poll { timelineOperation?.cancel() }
+        let operationID = UUID()
+        timelineOperationID = operationID
+        let operation = Task<Void, Never> { [weak self] in
+            guard let self else { return }
+            await self.performTimelineRefresh(mode: mode)
+        }
+        timelineOperation = operation
+        await withTaskCancellationHandler {
+            await operation.value
+        } onCancel: {
+            operation.cancel()
+        }
+        if timelineOperationID == operationID { timelineOperation = nil }
+    }
+
+    private func performTimelineRefresh(mode: RefreshMode) async {
         let token = sessionToken, revision = queryRevision
         if mode == .poll, refreshInFlight { return }
         while refreshInFlight {
@@ -491,7 +705,22 @@ final class CaptureStore {
         if mode != .poll { isLoadingTimeline = true }
         defer { refreshInFlight = false; if revision == queryRevision { isLoadingTimeline = false } }
         do {
-            let snapshot = try await index.refresh(mode: .live)
+            // Session state and worker telemetry remain available while a large cache catches up.
+            if let directory = session?.directory {
+                let wasActive = session?.isActive == true
+                let metadata = try await Self.readMetadata(URL(fileURLWithPath: directory))
+                let volume = await Self.readVolume(URL(fileURLWithPath: directory))
+                guard token == sessionToken, !Task.isCancelled else { return }
+                session = metadata
+                if wasActive && !metadata.isActive { logScopeMode = .app; isCancellingSave = false }
+                deviceLogProgress = volume.progress
+                saveProgress = volume.saveProgress
+                networkEvidenceBytes = volume.network; rawEvidenceBytes = volume.raw; timelineCacheBytes = volume.cache
+                availableDiskBytes = volume.available
+            }
+            let snapshot: NativeTimelineSnapshot
+            if isIndexingPaused { snapshot = try await index.currentSnapshot() }
+            else { snapshot = try await index.refresh(mode: .live) }
             let stateData = try await index.sessionData()
             guard token == sessionToken, revision == queryRevision, !Task.isCancelled else { return }
             let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -499,7 +728,7 @@ final class CaptureStore {
             session = metadata.merging(snapshot)
             pendingTimelineBytes = snapshot.pendingBytes
             // A poll can discover Stop completed. Let this final query finish before the loop exits.
-            if !metadata.isActive { pollingTask = nil }
+            if !metadata.isActive && snapshot.pendingBytes == 0 { pollingTask = nil }
             var changed = false
             if let generation, generation != snapshot.generation {
                 // Ingress boundaries cannot describe replaced raw evidence. Tell the user why the view resets.
@@ -619,5 +848,17 @@ final class CaptureStore {
         guard hasNewerEvents else { return }
         userDidInteractWithTimeline()
         await refreshTimeline(mode: .newer)
+    }
+
+    func toggleBackgroundIndexing() {
+        guard session?.isActive != true, pendingTimelineBytes > 0 else { return }
+        isIndexingPaused.toggle()
+        if isIndexingPaused {
+            pollingTask?.cancel(); pollingTask = nil
+            timelineTask?.cancel(); timelineTask = nil
+            timelineOperation?.cancel()
+            isLoadingTimeline = false
+            presentationHint = "Indexing paused. Original evidence is retained; resume to search the remaining records."
+        } else { beginPolling() }
     }
 }

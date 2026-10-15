@@ -5,7 +5,10 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/Sources/NativeCaptureServices" "$work/Tests/NativeCaptureServicesTests"
 cp Sources/Core/Support.swift Sources/Core/Shell/ShellRunner.swift Sources/Core/CaptureServices/*.swift "$work/Sources/NativeCaptureServices/"
+cp Sources/Core/CaptureModels.swift Sources/Core/Capture/NativeTimelineModels.swift Sources/Core/Capture/CaptureLogScope.swift \
+  Sources/Core/Capture/CaptureLoggingPolicy.swift "$work/Sources/NativeCaptureServices/"
 cp Tests/NativeCaptureServicesTests.swift "$work/Tests/NativeCaptureServicesTests/"
+cp Tests/CaptureLogDiscoveryTests.swift "$work/Tests/NativeCaptureServicesTests/"
 cat > "$work/Package.swift" <<'SWIFT'
 // swift-tools-version: 6.3
 import PackageDescription

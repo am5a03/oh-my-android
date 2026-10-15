@@ -124,54 +124,30 @@ extension NativeCaptureHost {
     }
 
     static func logs(request: NativeCaptureRequest, tools: [String: String], directory: URL, state: inout CaptureHostState) async throws -> [String] {
-        if request.platform == "iphone" {
-            guard let logger = tools["idevicesyslog"] else { throw AppError("iPhone device logs require libimobiledevice. Install it with brew install libimobiledevice, then Refresh.") }
-            state["context"] = .object(["log_scope": .object(["mode": .string("iphone_usb_device_logs"), "target_app": request.target_app.map(CaptureStateValue.string) ?? .null,
-                "service": .string("os_trace_relay"), "timezone": .string("UTC")])])
-            state.warn("iPhone USB logs include multiple processes. Private OS log fields can be redacted; the optional app identifier is investigation context.")
-            return [logger, "--udid", request.device_id, "--exit", "--no-colors"]
+        guard let scope = request.log_scope else {
+            throw AppError("Choose an installed app for Device Logs, or explicitly select Whole Device for this recording. Network-only capture does not need a log scope.")
         }
-        if request.platform == "android" {
-            guard let adb = tools["adb"] else { throw AppError("ADB is required for Android logs.") }
-            if request.target_app?.isEmpty == false { state.warn("Android target app is recorded as context. Raw device logs include all processes so app restarts and SDK processes are retained.") }
-            return [adb, "-s", request.device_id, "logcat", "-v", "epoch", "-T", "1"]
+        let device = CaptureDevice(id: request.device_id, name: request.device_name ?? request.device_id,
+                                   platform: request.platform, state: request.platform == "simulator" ? "booted" : "ready")
+        let resolved = try await CaptureLogDiscovery().resolve(device: device, scope: scope, tools: tools)
+        let portable = try JSONDecoder().decode(CaptureHostState.self, from: resolved.contextJSON)
+        var context = state["context"]?.object ?? [:]
+        context["log_scope"] = .object(portable)
+        state["context"] = .object(context)
+        let filterURL = directory.appendingPathComponent("runtime/log-filter.json")
+        if let filter = resolved.filter { try CaptureLifecycleFiles.write(filter, at: filterURL) }
+        else if FileManager.default.fileExists(atPath: filterURL.path) { try FileManager.default.removeItem(at: filterURL) }
+        if scope.mode == .wholeDevice {
+            state.warn("Whole Device logs were explicitly selected for this recording. Unrelated app and system messages may be included; configured log limits still apply.")
+        } else if request.platform == "android" {
+            state.warn("Device logs include all available levels from the selected Android app UID across process restarts. Other UIDs, including isolated SDK processes, are excluded. Identity loss stops device logs while network capture continues.")
+            if resolved.filter?.strategy == .androidProcessMap {
+                state.warn("This Android device needs verified PID-lifetime filtering. Processes that start and exit entirely between identity checks may be absent; ambiguous PID reuse stops device logs with a coverage gap.")
+            }
+        } else {
+            state.warn("Device logs use verified executable names and configured helpers across process restarts. Unlisted helpers are excluded; shared names can include other apps, and private OS fields may be redacted.")
         }
-        guard let simctlPath = tools["simctl"] else { throw AppError("Simulator tools are unavailable.") }
-        let simctl = URL(fileURLWithPath: simctlPath)
-        let target = request.target_app?.trimmed ?? ""
-        var process: String?
-        var scope: CaptureHostState = ["mode": .string("all_simulator_processes"), "predicate": .null]
-        if !target.isEmpty {
-            let result = try await CaptureHostProcesses.checked(simctl, arguments: ["listapps", request.device_id], directory: directory.appendingPathComponent("runtime"))
-            let data = Data(result.stdout.utf8)
-            let apps: CaptureHostState
-            if let decoded = try? JSONDecoder().decode(CaptureHostState.self, from: data) { apps = decoded }
-            else {
-                let propertyList = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
-                let json = try JSONSerialization.data(withJSONObject: propertyList)
-                apps = try JSONDecoder().decode(CaptureHostState.self, from: json)
-            }
-            guard let entry = apps[target], case .object(let app) = entry else { throw AppError("Target app \(target) is not installed on this Simulator. Enter its exact bundle identifier or clear the target.") }
-            guard app.text("CFBundleIdentifier") == nil || app.text("CFBundleIdentifier") == target else { throw AppError("Simulator app metadata has an inconsistent bundle identifier. No routing was changed.") }
-            process = app.text("CFBundleExecutable")
-            var resolution = "simctl listapps CFBundleExecutable"
-            if process == nil {
-                let container = try await CaptureHostProcesses.checked(simctl, arguments: ["get_app_container", request.device_id, target, "app"], directory: directory.appendingPathComponent("runtime"))
-                let info = try Data(contentsOf: URL(fileURLWithPath: container.stdout.trimmed).appendingPathComponent("Info.plist"))
-                let metadata = try PropertyListSerialization.propertyList(from: info, options: [], format: nil) as? [String: Any]
-                process = metadata?["CFBundleExecutable"] as? String
-                resolution = "simctl get_app_container Info.plist CFBundleExecutable"
-            }
-            guard let name = process, !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else {
-                throw AppError("The target app does not declare a usable process executable. No routing was changed.")
-            }
-            let predicate = CaptureServiceCommand.simulatorLogs(simctl: simctl, identifier: request.device_id, processName: name).arguments.last ?? ""
-            scope = ["mode": .string("simulator_process"), "bundle_id": .string(target), "executable": .string(name), "predicate": .string(predicate), "resolution": .string(resolution)]
-            state.warn("Simulator logs are scoped to process \(name) from bundle \(target). Includes SDK logs emitted by that process across restarts; separate helper and extension processes are outside this scope.")
-        } else { state.warn("Simulator logs include all processes at debug level. Enter a target app bundle identifier for process-scoped logs.") }
-        var context = state["context"]?.object ?? [:]; context["log_scope"] = .object(scope); state["context"] = .object(context)
-        let command = CaptureServiceCommand.simulatorLogs(simctl: simctl, identifier: request.device_id, processName: process)
-        return [command.executable.path] + command.arguments
+        return resolved.command
     }
 
     static func freePort() throws -> UInt16 {

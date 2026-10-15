@@ -58,6 +58,16 @@ indirect enum CaptureJSON: Decodable, Sendable {
         return value
     }
 
+    var numberValue: Double? {
+        guard case .number(let value) = self else { return nil }
+        return value
+    }
+
+    var boolValue: Bool? {
+        guard case .bool(let value) = self else { return nil }
+        return value
+    }
+
     func excluding(_ keys: Set<String>) -> CaptureJSON {
         guard case .object(let values) = self else { return self }
         return .object(values.filter { !keys.contains($0.key) })
@@ -127,10 +137,13 @@ struct CaptureSession: Decodable, Sendable {
     let counts: [String: Int]
     let routingRestored: Bool?
     let caCertificatePath: String?
+    let context: CaptureJSON?
+    let completeness: CaptureJSON?
+    let saveProgress: CaptureJSON?
 
     enum CodingKeys: String, CodingKey {
         case id, directory, platform, deviceId, deviceName, startedAt, phase, sources, warnings
-        case packagePath, counts, routingRestored, caCertificatePath
+        case packagePath, counts, routingRestored, caCertificatePath, context, completeness, saveProgress
     }
 
     init(from decoder: any Decoder) throws {
@@ -148,6 +161,9 @@ struct CaptureSession: Decodable, Sendable {
         packagePath = try values.decodeIfPresent(String.self, forKey: .packagePath)
         routingRestored = try values.decodeIfPresent(Bool.self, forKey: .routingRestored)
         caCertificatePath = try values.decodeIfPresent(String.self, forKey: .caCertificatePath)
+        context = try values.decodeIfPresent(CaptureJSON.self, forKey: .context)
+        completeness = try values.decodeIfPresent(CaptureJSON.self, forKey: .completeness)
+        saveProgress = try values.decodeIfPresent(CaptureJSON.self, forKey: .saveProgress)
     }
 
     private init(copying session: Self, counts: [String: Int], sources: [String: String], warnings: [String]) {
@@ -155,6 +171,7 @@ struct CaptureSession: Decodable, Sendable {
         deviceId = session.deviceId; deviceName = session.deviceName; startedAt = session.startedAt
         phase = session.phase; packagePath = session.packagePath; routingRestored = session.routingRestored
         caCertificatePath = session.caCertificatePath
+        context = session.context; completeness = session.completeness; saveProgress = session.saveProgress
         self.counts = counts; self.sources = sources; self.warnings = warnings
     }
 
@@ -177,7 +194,11 @@ struct CaptureSession: Decodable, Sendable {
 
     var isActive: Bool { ["preparing", "recording", "stopping"].contains(phase) }
     var needsRoutingRecovery: Bool { routingRestored == false }
-    var needsPackageRetry: Bool { ["partial", "failed"].contains(phase) && packagePath == nil }
+    var needsPackageRetry: Bool {
+        ["partial", "failed"].contains(phase) && (packagePath == nil
+            || completeness?.value(for: "export_cancelled_by_user")?.boolValue == true
+            || completeness?.value(for: "export_failed")?.boolValue == true)
+    }
     var canFinalize: Bool { isActive || needsRoutingRecovery || needsPackageRetry }
 }
 
