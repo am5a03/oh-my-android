@@ -73,6 +73,7 @@ final class CaptureStore {
     private(set) var isLoadingTimeline = false
     private(set) var isBusy = false
     private(set) var isStarting = false
+    private(set) var isStopping = false
     private(set) var isAddingMarker = false
     private(set) var didDiscover = false
     private(set) var error: String?
@@ -252,7 +253,8 @@ final class CaptureStore {
         pollingTask?.cancel()
         pollingTask = nil
         isBusy = true
-        defer { isBusy = false; beginPolling() }
+        isStopping = true
+        defer { isStopping = false; isBusy = false; beginPolling() }
         while isAddingMarker { try? await Task.sleep(for: .milliseconds(20)) }
         error = nil
         do {

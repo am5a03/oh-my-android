@@ -8,6 +8,13 @@ and/or network requests, and click **Start Capture**. Use the device, add marker
 for reproduction steps, then click **Stop & Save**. The result is one ZIP and a
 shared timeline linking log messages and network events to original evidence.
 
+After **Stop & Save** finishes, a persistent **Capture Saved** confirmation offers
+**Export ZIP…** and **Show in Finder**. Review the timeline below or use **Start
+Capture** to record another session. A saved package with incomplete coverage is
+labelled **Capture Saved with Warnings**, with its warnings available in the
+confirmation. If saving fails, **Retry Save** remains available instead of a
+success confirmation.
+
 This implementation has no company repositories, accounts, endpoint lists, app
 identifiers or analyzers as dependencies. Physical iPhone is a later phase.
 

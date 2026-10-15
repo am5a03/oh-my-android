@@ -5,7 +5,7 @@ struct CaptureView: View {
     @Bindable var store: CaptureStore
     @State private var showRuntimeSettings = false
     @State private var showCaptureWarnings = false
-    @State private var isStopping = false
+    @State private var savedNoticeHeight: CGFloat = 0
     @State private var headerContentHeight: CGFloat = 0
     @State private var recoveryNoticeHeight: CGFloat = 32
     @State private var timelineHeaderHeight: CGFloat = 130
@@ -16,6 +16,12 @@ struct CaptureView: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
+                if let session = savedSession {
+                    savedCaptureNotice(session)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { savedNoticeHeight = $0 }
+                    Divider()
+                }
                 captureHeader(maximumHeight: headerMaximumHeight(available: geometry.size.height))
                 Divider()
                 timeline
@@ -70,7 +76,7 @@ struct CaptureView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 if store.hasActiveCapture || store.session?.needsPackageRetry == true {
-                    Button { Task { await stopCapture() } } label: {
+                    Button { Task { await store.stop() } } label: {
                         toolbarLabel(stopTitle, symbol: store.hasActiveCapture ? "stop.fill" : "arrow.clockwise")
                     }
                     .buttonStyle(.borderedProminent)
@@ -94,7 +100,65 @@ struct CaptureView: View {
     private func headerMaximumHeight(available height: CGFloat) -> CGFloat {
         // Expanded prerequisites/warnings yield space before the evidence pane does.
         let reserved = minimumEventPaneHeight + timelineHeaderHeight + markerComposerHeight + footerHeight + 2
+            + (savedSession == nil ? 0 : savedNoticeHeight + 1)
         return max(0, min(360, min(height * 0.4, height - reserved)))
+    }
+
+    private var savedSession: CaptureSession? {
+        guard !store.isStarting, !store.isStopping, let session = store.session,
+              !session.isActive, !session.needsRoutingRecovery, session.packagePath != nil else { return nil }
+        return session
+    }
+
+    private func savedCaptureNotice(_ session: CaptureSession) -> some View {
+        let hasWarnings = session.phase != "saved" || !session.warnings.isEmpty
+        return VStack(alignment: .leading, spacing: 8) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 16) {
+                    savedCaptureMessage(session, hasWarnings: hasWarnings)
+                    Spacer(minLength: 8)
+                    savedCaptureActions
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    savedCaptureMessage(session, hasWarnings: hasWarnings)
+                    savedCaptureActions
+                }
+            }
+            if hasWarnings {
+                captureWarnings(session, maximumHeight: 110)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.bar)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func savedCaptureMessage(_ session: CaptureSession, hasWarnings: Bool) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: hasWarnings ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                .font(.title2).foregroundStyle(hasWarnings ? Color.orange : Color.green)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(session.phase == "failed" ? "Evidence Saved after Capture Failure" : hasWarnings ? "Capture Saved with Warnings" : "Capture Saved")
+                    .font(.headline)
+                Text(hasWarnings
+                     ? "The ZIP is ready. Review capture warnings and the timeline before sharing."
+                     : "The ZIP is ready. Review the timeline below, export a copy, or start another capture.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var savedCaptureActions: some View {
+        HStack(spacing: 8) {
+            Button("Export ZIP…", systemImage: "archivebox") { store.exportPackage() }
+                .buttonStyle(.borderedProminent)
+                .help("Save a copy of the evidence ZIP to a location you choose.")
+            Button("Show in Finder", systemImage: "folder") { store.revealPackage() }
+                .help("Select the saved evidence ZIP in Finder.")
+        }
     }
 
     private func captureHeader(maximumHeight: CGFloat) -> some View {
@@ -134,7 +198,7 @@ struct CaptureView: View {
                 if session.needsPackageRetry, !store.hasActiveCapture {
                     notice("The ZIP is not available. Use Retry Save to package the existing capture evidence.", symbol: "archivebox", color: .orange)
                 }
-                captureWarnings(session)
+                if savedSession == nil { captureWarnings(session) }
             }
         }
         .frame(maxWidth: .infinity)
@@ -188,38 +252,42 @@ struct CaptureView: View {
 
     private var operationTitle: String {
         if store.isStarting { return "Preparing capture…" }
-        if isStopping { return store.session?.needsRoutingRecovery == true ? "Restoring connection and saving…" : "Stopping and saving…" }
+        if store.isStopping { return store.session?.needsRoutingRecovery == true ? "Restoring connection and saving…" : "Stopping and saving…" }
         return "Updating session…"
     }
 
-    private func stopCapture() async {
-        isStopping = true
-        defer { isStopping = false }
-        await store.stop()
-    }
-
     @ViewBuilder
-    private func captureWarnings(_ session: CaptureSession) -> some View {
+    private func captureWarnings(_ session: CaptureSession, maximumHeight: CGFloat? = nil) -> some View {
         let warnings = session.warnings.filter { session.routingRestored != false || !$0.hasPrefix("Routing recovery still required:") }
         if !warnings.isEmpty {
             DisclosureGroup(isExpanded: $showCaptureWarnings) {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
-                        Text(warning).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                Group {
+                    if let maximumHeight {
+                        ScrollView(.vertical) { captureWarningDetails(session, warnings: warnings) }
+                            .frame(height: maximumHeight)
+                    } else {
+                        captureWarningDetails(session, warnings: warnings)
                     }
-                    if session.platform == "android", session.caCertificatePath != nil {
-                        Button("Show Capture Certificate in Finder…") { store.revealCaptureCertificate() }
-                        Text("Install this public certificate on the device. The test app must also trust it.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.top, 8)
+                }.padding(.top, 8)
             } label: {
                 Label("\(warnings.count) Capture \(warnings.count == 1 ? "Warning" : "Warnings")", systemImage: "exclamationmark.triangle")
             }
             .font(.caption)
             .padding(.horizontal, 16).padding(.vertical, 8)
             .background(.quaternary)
+        }
+    }
+
+    private func captureWarningDetails(_ session: CaptureSession, warnings: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
+                Text(warning).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+            }
+            if session.platform == "android", session.caCertificatePath != nil {
+                Button("Show Capture Certificate in Finder…") { store.revealCaptureCertificate() }
+                Text("Install this public certificate on the device. The test app must also trust it.")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -312,7 +380,7 @@ struct CaptureView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(phaseTitle).font(.headline)
                 Text(store.activeTargetName).font(.caption).foregroundStyle(.secondary)
-                if !store.canStart && !store.hasActiveCapture && !store.isBusy && store.session?.needsPackageRetry != true {
+                if savedSession == nil && !store.canStart && !store.hasActiveCapture && !store.isBusy && store.session?.needsPackageRetry != true {
                     Text(startHelp).font(.caption).foregroundStyle(.secondary)
                 } else if store.session?.isActive == true {
                     Text("Stop & Save creates the ZIP for export. Closing this window keeps recording.")
@@ -336,7 +404,7 @@ struct CaptureView: View {
 
     private var phaseTitle: String {
         if store.isStarting { return "Preparing Capture…" }
-        if isStopping { return store.session?.needsRoutingRecovery == true ? "Restoring Connection & Saving…" : "Stopping & Saving…" }
+        if store.isStopping { return store.session?.needsRoutingRecovery == true ? "Restoring Connection & Saving…" : "Stopping & Saving…" }
         guard let session = store.session else { return "Ready to Capture" }
         if session.needsRoutingRecovery { return "Connection Needs Recovery" }
         return switch session.phase {
