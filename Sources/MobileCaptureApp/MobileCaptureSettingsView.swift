@@ -4,6 +4,8 @@ struct MobileCaptureSettingsView: View {
     @Bindable var store: CaptureStore
     private let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
 
+    private let isDevelopment = Bundle.main.object(forInfoDictionaryKey: "MobileCaptureDevelopmentIdentity") as? Bool ?? true
+
     var body: some View {
         Form {
             Section("Saved Captures") {
@@ -15,9 +17,9 @@ struct MobileCaptureSettingsView: View {
                 Text("Existing sessions, certificates and iPhone tunnel profiles stay in their current locations.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Development Build") {
+            Section(isDevelopment ? "Development Build" : "Updates") {
                 LabeledContent("Version", value: version)
-                Text("Automatic updates are disabled. This app uses a provisional local development identity.")
+                Text(isDevelopment ? "Automatic updates are disabled. This app uses a provisional local development identity." : "Automatic updates are disabled. Install reviewed builds from the project’s distribution instructions.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

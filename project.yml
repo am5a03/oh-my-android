@@ -8,6 +8,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
+    MOBILE_CAPTURE_BUNDLE_IDENTIFIER: local.mobilecapture.development
     MACOSX_DEPLOYMENT_TARGET: "26.0"
     # Ad-hoc signing so anyone can build and run. Scripts/release.sh signs with a Developer ID.
     CODE_SIGN_STYLE: Manual
@@ -62,6 +63,7 @@ targets:
       path: Sources/App/Info.plist
       properties:
         CFBundleDisplayName: Oh My Android
+        MobileCaptureCompanionBundleIdentifier: "$(MOBILE_CAPTURE_BUNDLE_IDENTIFIER)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: public.app-category.developer-tools
@@ -127,7 +129,7 @@ targets:
       base:
         PRODUCT_NAME: mobile-capture-host
         PRODUCT_MODULE_NAME: MobileCaptureHost
-        PRODUCT_BUNDLE_IDENTIFIER: local.mobilecapture.development.host
+        PRODUCT_BUNDLE_IDENTIFIER: "$(MOBILE_CAPTURE_BUNDLE_IDENTIFIER).host"
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         SKIP_INSTALL: YES
@@ -141,7 +143,7 @@ targets:
       base:
         PRODUCT_NAME: mobile-capture-proxy
         PRODUCT_MODULE_NAME: MobileCaptureProxy
-        PRODUCT_BUNDLE_IDENTIFIER: local.mobilecapture.development.proxy
+        PRODUCT_BUNDLE_IDENTIFIER: "$(MOBILE_CAPTURE_BUNDLE_IDENTIFIER).proxy"
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         SKIP_INSTALL: YES
@@ -206,7 +208,7 @@ targets:
         com.apple.security.app-sandbox: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: local.mobilecapture.development
+        PRODUCT_BUNDLE_IDENTIFIER: "$(MOBILE_CAPTURE_BUNDLE_IDENTIFIER)"
         PRODUCT_NAME: Mobile Capture
         PRODUCT_MODULE_NAME: MobileCapture
         MARKETING_VERSION: "0.1.0"

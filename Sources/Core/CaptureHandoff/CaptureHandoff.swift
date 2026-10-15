@@ -6,6 +6,11 @@ enum CaptureAppIdentity {
     static let productMetadataKey = "MobileCaptureCompanion"
     static let versionsMetadataKey = "MobileCaptureHandoffVersions"
     static let scheme = "mobilecapture"
+    static var discoverableBundleIdentifier: String {
+        let configured = Bundle.main.object(forInfoDictionaryKey: "MobileCaptureCompanionBundleIdentifier") as? String
+        guard let configured, !configured.isEmpty, !configured.contains("$(") else { return developmentBundleIdentifier }
+        return configured
+    }
 }
 
 /// Public, launch-only contract. A handoff can never start capture or change device routing.

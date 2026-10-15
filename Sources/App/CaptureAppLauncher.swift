@@ -128,7 +128,7 @@ final class CaptureAppLauncher {
             }
             return app
         }
-        guard let url = opener.applicationURL(bundleIdentifier: CaptureAppIdentity.developmentBundleIdentifier) else { return nil }
+        guard let url = opener.applicationURL(bundleIdentifier: CaptureAppIdentity.discoverableBundleIdentifier) else { return nil }
         return try CaptureCompanionApplication(url: url)
     }
 }

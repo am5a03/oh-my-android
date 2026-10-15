@@ -6,6 +6,7 @@ import Foundation
 struct CaptureTimelineTests {
     @MainActor
     static func main() async throws {
+        try await newerSessionIsNotModified()
         let settings = CaptureStore()
         try require(!settings.captureLogs, "device logging is opt-in")
         settings.targetApp = "dev.example.first"
@@ -117,6 +118,23 @@ struct CaptureTimelineTests {
         try require(store.visibleEvents.isEmpty && store.error == nil, "search text starting with dashes is passed literally")
         try await highVolumeLiveCapture()
         print("Capture timeline store checks passed (bounded held view, full-session filters, body search, pause/clear, native markers, lazy details, paging and ordering).")
+    }
+
+    @MainActor
+    static func newerSessionIsNotModified() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("capture-newer-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let state: [String: Any] = ["id": "future", "directory": directory.path, "platform": "android", "device_id": "synthetic",
+            "device_name": "Synthetic", "started_at": "2026-10-15T00:00:00Z", "phase": "recording", "coordinator_version": 99]
+        let original = try JSONSerialization.data(withJSONObject: state)
+        let file = directory.appendingPathComponent("session.json")
+        try original.write(to: file)
+        let store = CaptureStore()
+        await store.loadSession(at: directory)
+        try require(store.session == nil && store.error?.contains("newer") == true, "manual open rejects newer session metadata")
+        try require(try Data(contentsOf: file) == original, "newer metadata is left unchanged")
+        try require(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("runtime").path), "newer sessions create no index or recovery files")
     }
 
     @MainActor

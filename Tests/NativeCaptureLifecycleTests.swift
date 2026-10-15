@@ -444,6 +444,21 @@ struct NativeCaptureLifecycleTests {
         #expect(journal.text("restored_at") != nil)
     }
 
+    @Test func newerCoordinatorCannotBeRecoveredOrWritten() async throws {
+        let fixture = try LifecycleFixture()
+        defer { fixture.cleanup() }
+        let directory = fixture.root.appendingPathComponent("future-session")
+        try CaptureLifecycleFiles.privateDirectory(directory)
+        let state: CaptureHostState = ["phase": .string("recording"), "coordinator_version": .number(99)]
+        let stateURL = directory.appendingPathComponent("session.json")
+        try CaptureLifecycleFiles.write(state, at: stateURL)
+        let original = try Data(contentsOf: stateURL)
+        #expect(throws: (any Error).self) { try NativeCaptureHost.status(directory: directory) }
+        await #expect(throws: (any Error).self) { try await NativeCaptureHost.stop(directory: directory) }
+        #expect(try Data(contentsOf: stateURL) == original)
+        #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("runtime").path))
+    }
+
     @Test func statusDoesNotOverwriteUnavailableSupervisorState() throws {
         let fixture = try LifecycleFixture()
         defer { fixture.cleanup() }

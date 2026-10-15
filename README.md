@@ -110,11 +110,14 @@ Then start an emulator and ask your agent: *"Take a screenshot of the emulator a
 
 ## Features
 
-**Capture prototype:** the **Capture Network & Logs…** menu collects Android or
-iOS Simulator network traffic and device logs into one ZIP with a shared timeline.
-It includes request/response bodies, reproduction markers and evidence references
-for engineer or AI handoff. See [setup, scope and proof workflow](docs/CAPTURE.md).
-Physical iPhone support is planned for a later phase.
+**Capture companion:** the independent **Mobile Capture.app** collects Android,
+iOS Simulator and physical-iPhone network traffic and bounded device logs into
+one ZIP with a shared timeline. It includes full request/response bodies,
+reproduction markers and raw evidence references. Oh My Android’s optional
+**Open Mobile Capture…** launcher passes the selected device/app; neither app
+requires the other. See [setup and scope](docs/CAPTURE.md) and
+[independent development builds](docs/CAPTURE-DISTRIBUTION.md). Physical-iPhone
+combined capture and network-engine shutdown remain release acceptance work.
 
 | | What you get |
 |---|---|

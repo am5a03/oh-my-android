@@ -2,8 +2,11 @@
 
 Tracks [issue #4](https://github.com/am5a03/oh-my-android/issues/4).
 
-The **Capture Network & Logs…** menu opens a separate capture window for an Android
-device/emulator, a paired physical iPhone, or a booted iOS Simulator. Select the device,
+Open the independent **Mobile Capture.app** for an Android device/emulator, a
+paired physical iPhone, or a booted iOS Simulator. Oh My Android’s optional
+**Open Mobile Capture…** menu opens that installed app and can preselect the
+current device/app. If it is absent, **Set Up Mobile Capture…** offers app
+selection; Oh My Android works independently. Select the device,
 choose network requests and/or device logs, and click **Start Capture**. When enabling
 logs, choose an installed application first. Logs are off initially, so network-only
 capture and certificate setup do not collect unrelated device activity. Use the device, add markers

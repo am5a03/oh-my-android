@@ -75,3 +75,61 @@ selected copies, incompatible versions, unrelated/escaped bundles and launch
 failures. It launches no application. Actual Launch Services warm/cold behavior,
 menu/window interaction and independent app quitting still need visual testing.
 Capture distribution scripts are updated in the following checkpoint.
+
+## Checkpoint 4: product packaging and transition boundaries
+
+- Added named `release-mobile-capture.sh` and `release-oh-my-android.sh` entry
+  points. The compatible `release.sh` command defaults to capture. Each produces
+  its own app/version/artifact and signs only its required nested code.
+- Capture packages alone receive pinned mitmproxy/Python/ADB. The dependency
+  packager rejects Oh My Android before changing a payload. The capture app and
+  helper IDs derive from `MOBILE_CAPTURE_BUNDLE_IDENTIFIER`; the nested engine ID
+  derives from the app's own ID. Public release mode requires an explicitly
+  supplied owner-controlled ID. Both apps retain disabled updater configuration;
+  capture does not link the original updater at all.
+- Added static bundle-boundary checks and independent CI builds. Capture keeps
+  only its native host/proxy/runtime; Oh My Android keeps only its Android MCP and
+  updater. The planned capture MCP has not been added in this work.
+- Manual session opening and host recovery now reject newer coordinator versions
+  before index creation or recovery writes, in addition to the launch-link
+  catalog check. Unknown evidence stays in place. Existing neutral evidence/CA/
+  private-profile paths and the global routing lease are unchanged.
+- Updated install/build/transition guidance, preserving original project license
+  attribution. Old active-session owners must finish/recover before their old
+  app bundle is removed; journals may reference those absolute helper paths.
+
+Validation completed in the isolated worktree:
+
+| Check | Result |
+| --- | --- |
+| Both independent optimized app/helper builds | Passed, Swift 6 warnings as errors |
+| Both ad-hoc signed artifacts, strict deep signature verification | Passed |
+| Capture dependency inventories/sealed hashes and clean system-PATH version probes | Passed |
+| Android app MCP protocol smoke | Passed, 18 tools |
+| Handoff, known-root catalog and fake companion-launcher fixtures | Passed |
+| Capture-store fixtures, including held sessions and newer-format preservation | Passed |
+| Native lifecycle/recovery/lease fixture suite | Passed, 33 tests across three suites |
+| Capture dependencies rejected for the original app | Passed before payload mutation |
+| Separate product ZIP integrity and SHA256 checks | Passed |
+| Shell syntax, static product boundaries and diff whitespace | Passed |
+
+The local artifacts are development builds, ad-hoc signed and not notarized.
+They were not installed or launched, and no device, host proxy, VPN, certificate
+or user evidence location was changed. Build tools can register their generated
+bundles with Launch Services as part of a normal Xcode build.
+
+## Remaining acceptance and release work
+
+Manual acceptance still needs actual cold/warm Launch Services handoff (including
+multiple installed copies and stale/incompatible choices), Dock/window/menu and
+Settings behavior, independent app quitting, fresh-app OS authorization, existing
+saved evidence inspection and old active-owner recovery. Then coordinate device
+captures with the user to verify the same timeline/package and unchanged CA/
+profile fingerprints. Synthetic lifecycle fixtures do not replace those checks.
+
+Public release additionally needs an owner-controlled permanent bundle identity,
+final dedicated icon/branding, reviewed distribution location, Developer ID
+signing/notarization/stapling and fresh-machine setup validation. The known
+physical-iPhone network-engine shutdown crash and remaining combined hardware
+capture proof still gate release. Guided setup and capture MCP are separate work
+that can reuse these service/product boundaries.

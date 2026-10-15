@@ -513,8 +513,14 @@ final class CaptureStore {
         guard values.isRegularFile == true, (values.fileSize ?? Int.max) <= 4 * 1024 * 1024 else {
             throw AppError("The capture metadata is unavailable or exceeds the supported size.")
         }
+        let data = try Data(contentsOf: url)
+        struct CoordinatorVersion: Decodable { let coordinator_version: Int? }
+        let version = try JSONDecoder().decode(CoordinatorVersion.self, from: data).coordinator_version
+        guard version == nil || version == 1 else {
+            throw AppError("This session was created by a newer capture coordinator. Use a compatible app; its evidence has not been changed.")
+        }
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try decoder.decode(CaptureSession.self, from: Data(contentsOf: url))
+        return try decoder.decode(CaptureSession.self, from: data)
     }
 
     private struct Volume: Sendable {

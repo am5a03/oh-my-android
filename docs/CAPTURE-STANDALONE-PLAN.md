@@ -1,5 +1,8 @@
 # Standalone Mobile Capture plan
 
+Implementation status and validation are tracked in
+[the checkpoint report](CAPTURE-STANDALONE-IMPLEMENTATION.md).
+
 Make Mobile Capture an independent macOS app. It owns device/network capture,
 setup, the shared timeline, recovery and evidence exports. Oh My Android keeps an
 optional launcher: when Mobile Capture is installed, it can open the app and pass

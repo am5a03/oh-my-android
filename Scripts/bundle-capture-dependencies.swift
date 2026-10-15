@@ -129,6 +129,11 @@ struct CaptureDependencyBundler {
         guard app.pathExtension == "app", fileManager.fileExists(atPath: app.appendingPathComponent("Contents/Info.plist").path) else {
             throw BundlingFailure.message("--app must name an already-built macOS application bundle.")
         }
+        guard let companionInfo = try PropertyListSerialization.propertyList(from: Data(contentsOf: app.appendingPathComponent("Contents/Info.plist")), format: nil) as? [String: Any],
+              companionInfo["MobileCaptureCompanion"] as? Bool == true,
+              ["mobile-capture-host", "mobile-capture-proxy"].allSatisfy({ fileManager.isExecutableFile(atPath: app.appendingPathComponent("Contents/MacOS/" + $0).path) }) else {
+            throw BundlingFailure.message("Capture dependencies belong only in the independently built Mobile Capture.app with its native helpers. Do not install them in Oh My Android.")
+        }
         if command == "install" {
             guard let hostInfo = try PropertyListSerialization.propertyList(from: Data(contentsOf: app.appendingPathComponent("Contents/Info.plist")), format: nil) as? [String: Any],
                   let executable = hostInfo["CFBundleExecutable"] as? String else { throw BundlingFailure.message("The host app has no valid executable metadata.") }
@@ -154,7 +159,7 @@ struct CaptureDependencyBundler {
             plist["CFBundleName"] = "Capture Network Engine"
             plist["CFBundleShortVersionString"] = lock.mitmproxyVersion
             plist["CFBundleVersion"] = lock.mitmproxyVersion
-            plist["CFBundleIdentifier"] = "dev.mobilecapture.network-engine"
+            plist["CFBundleIdentifier"] = (companionInfo["CFBundleIdentifier"] as? String ?? "local.mobilecapture.development") + ".network-engine"
             try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0).write(to: plistURL, options: .atomic)
             let wrapper = engineTarget.appendingPathComponent("Contents/MacOS/.mitmproxy-wrapper")
             if fileManager.fileExists(atPath: wrapper.path) {

@@ -42,6 +42,8 @@
 	<string>public.app-category.developer-tools</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
+	<key>MobileCaptureCompanionBundleIdentifier</key>
+	<string>$(MOBILE_CAPTURE_BUNDLE_IDENTIFIER)</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>

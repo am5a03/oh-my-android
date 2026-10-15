@@ -481,7 +481,11 @@ enum NativeCaptureHost {
     static func load(_ directory: URL) throws -> CaptureHostState {
         guard directory.path.hasPrefix("/") else { throw AppError("Session directory must be an absolute path.") }
         _ = try CaptureEvidenceFiles(directory: directory)
-        return try CaptureLifecycleFiles.read(CaptureHostState.self, at: directory.appendingPathComponent("session.json"))
+        let state = try CaptureLifecycleFiles.read(CaptureHostState.self, at: directory.appendingPathComponent("session.json"))
+        guard state["coordinator_version"] == nil || state["coordinator_version"] == .number(1) else {
+            throw AppError("This session requires a newer capture coordinator. Recovery has been deferred without changing its evidence or routing.")
+        }
+        return state
     }
     private static func stateValue(_ value: some Encodable) throws -> CaptureStateValue {
         try JSONDecoder().decode(CaptureStateValue.self, from: JSONEncoder().encode(value))
