@@ -109,7 +109,7 @@ PAGE = r'''<!doctype html>
 <div id="status" role="status" aria-live="polite">Ready.</div>
 <small>Proof: <code id="nonce"></code></small>
 <p>This page sends synthetic text to httpbingo.org. It sends no cookies or personal app data. The response is saved privately on your Mac for a byte-for-byte comparison.</p>
-<small>USB device logs are captured alongside this request. Safari does not add a custom application log marker.</small>
+<small>Device logs are captured only when selected in Mobile Capture. Safari does not add a custom application log marker.</small>
 <script>
 'use strict';
 const nonce = __NONCE__;
@@ -251,7 +251,7 @@ class ProofHandler(BaseHTTPRequestHandler):
             self.reply(400, {"error": str(error)})
 
 
-def verify(package: Path, receipt_path: Path, nonce: str, require_native: bool, tunnel_ip: str) -> dict:
+def verify(package: Path, receipt_path: Path, nonce: str, require_native: bool, tunnel_ip: str, network_only: bool = False) -> dict:
     receipt_data = receipt_path.read_bytes()
     assert len(receipt_data) <= MAX_RECEIPT_BYTES, "Receipt exceeds the bounded proof size"
     receipt = validate_receipt(json.loads(receipt_data), nonce)
@@ -268,8 +268,10 @@ def verify(package: Path, receipt_path: Path, nonce: str, require_native: bool, 
         names = set(names)
         assert all(not PurePosixPath(name).is_absolute() and ".." not in PurePosixPath(name).parts for name in names), "Unsafe ZIP path"
         required = {"manifest.json", "SHA256SUMS", "timeline/events.jsonl", "timeline/markers.jsonl", "network/events.jsonl",
-                    "network/capture.har", "network/capture.mitm", "logs/device.log"}
-        assert required <= names, "Combined phone package is missing an evidence source"
+                    "network/capture.har", "network/capture.mitm"}
+        if not network_only:
+            required.add("logs/device.log")
+        assert required <= names, "The proof package is missing an evidence source"
         allowed = required | {"context.json", "README.txt", "network/incomplete.json"}
         assert names <= allowed, "Unexpected/private file outside the evidence allowlist"
         checked = set()
@@ -286,7 +288,10 @@ def verify(package: Path, receipt_path: Path, nonce: str, require_native: bool, 
         manifest = json.loads(archive.read("manifest.json"))
         assert manifest["platform"] == "iphone", "Expected physical iPhone capture"
         assert manifest.get("routing_restored") is True, "Phone tunnel-off confirmation/restoration unverified"
-        assert manifest["sources"]["logs"] in ("observed", "interrupted"), "USB device logs unavailable"
+        if network_only:
+            assert manifest["sources"].get("logs") == "not_selected", "Network-only verification requires device logs not selected during recording"
+        else:
+            assert manifest["sources"]["logs"] in ("observed", "interrupted"), "USB device logs unavailable"
         assert manifest["sources"]["network"] in ("observed", "interrupted"), "Network evidence unavailable"
         entries = []
         for entry in json.loads(archive.read("network/capture.har"))["log"]["entries"]:
@@ -317,6 +322,7 @@ def verify(package: Path, receipt_path: Path, nonce: str, require_native: bool, 
                     continue
                 event = json.loads(row)
                 event_count += 1
+                assert not network_only or event["source"] != "logs", "Network-only timeline unexpectedly contains device logs"
                 match = re.fullmatch(r"([^#]+)#L([1-9][0-9]*)", event["raw_ref"])
                 assert match and match[1] in names, "Timeline raw reference missing from package"
                 relative, line = match[1], int(match[2])
@@ -335,7 +341,8 @@ def verify(package: Path, receipt_path: Path, nonce: str, require_native: bool, 
                     markers.append(event); selected.append(event)
                 elif event["source"] == "network" and event["detail"].get("flow_id") == flow_id:
                     flow_events.append(event); selected.append(event)
-        assert logs, "Parsed, timestamped iPhone USB logs missing"
+        if not network_only:
+            assert logs, "Parsed, timestamped iPhone USB logs missing"
         assert markers, "Nonce user marker missing from shared timeline"
         wanted = {event["raw_ref"] for event in selected}
         source_lines = {}
@@ -387,14 +394,16 @@ def verify(package: Path, receipt_path: Path, nonce: str, require_native: bool, 
                 assert flow.response and flow.response.status_code == 200 and flow.response.content == expected_response, "Native response bytes differ from Safari"
                 assert flow.client_conn.peername and flow.client_conn.peername[0] == tunnel_ip, "Native flow client does not match phone tunnel"
                 native_parity = True
-        return {"platform": "iphone", "proof_mode": "safari", "session_id": manifest["id"], "package": str(package),
+        return {"platform": "iphone", "proof_mode": "safari", "proof_scope": "network_only" if network_only else "combined",
+                "session_id": manifest["id"], "package": str(package),
                 "receipt": str(receipt_path), "proof_nonce": nonce, "http_status": 200, "flow_id": flow_id,
                 "request_bytes": len(expected_request), "response_bytes": len(expected_response),
                 "request_sha256": receipt["request_sha256"], "response_sha256": receipt["response_sha256"],
                 "network_client_address": tunnel_ip, "native_har_safari_body_parity": native_parity,
                 "parsed_usb_log_events": logs, "timeline_events": event_count, "package_files": len(names),
                 "sources": manifest["sources"], "routing_restored": True,
-                "device_log_correlation": "USB logs coexist in the timeline; Safari provides no custom app/request log marker"}
+                "device_log_correlation": "Device logs not selected; this proof verifies network and user markers only" if network_only
+                    else "USB logs coexist in the timeline; Safari provides no custom app/request log marker"}
 
 
 def main() -> None:
@@ -410,13 +419,14 @@ def main() -> None:
     check.add_argument("--receipt", type=Path, required=True)
     check.add_argument("--nonce", required=True)
     check.add_argument("--phone-tunnel-ip", default="10.0.0.1")
+    check.add_argument("--network-only", action="store_true", help="Verify a session recorded with device logs not selected; makes no USB-log claim")
     check.add_argument("--require-native", action="store_true", help="Also compare native flow bodies; requires mitmproxy Python environment")
     check.add_argument("--report", type=Path)
     args = parser.parse_args()
     if not NONCE.fullmatch(args.nonce):
         parser.error("Use a fresh neutral 8–128 character alphanumeric proof nonce (dots, underscores and hyphens allowed)")
     if args.command == "verify":
-        result = verify(args.package, args.receipt, args.nonce, args.require_native, args.phone_tunnel_ip)
+        result = verify(args.package, args.receipt, args.nonce, args.require_native, args.phone_tunnel_ip, args.network_only)
         if args.report:
             private_write(args.report, result)
         print(json.dumps(result, indent=2))

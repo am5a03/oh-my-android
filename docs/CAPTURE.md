@@ -25,6 +25,13 @@ libimobiledevice (`brew install libimobiledevice`) and an unlocked phone that
 trusts this Mac. The optional app identifier remains investigation context;
 the USB stream retains logs across processes and app restarts.
 
+The current iPhone collector records all device processes without a size or time
+limit. Timeline filters affect the display only. Keep device logs off during
+tunnel/certificate setup and use short recordings for reproductions; an unfiltered
+setup run produced 1.8 GB of raw logs in about 15 minutes, with a much larger
+temporary index and a prolonged save. App-scoped capture, explicit recording limits
+and a compact index remain necessary before an AdOps release.
+
 For physical iPhone network capture, select the phone and choose **Set Up iPhone
 Capture…**. Keep the phone and Mac on the same reachable Wi-Fi network. Scan the
 private profile QR code in WireGuard and name it **Mobile Capture**. Start Capture
@@ -210,7 +217,9 @@ log hash, timeline references, package checksums and optional native/HAR body pa
 ### Physical iPhone proof in Safari
 
 Complete WireGuard and CA trust setup first, then start a fresh, short capture
-with both sources selected. USB OS logs can grow quickly during setup. The Safari
+with both sources selected for a combined proof. For a focused **network-only**
+proof, leave **Device logs** unchecked and select network requests. USB OS logs can
+grow quickly during setup. The Safari
 proof requires no signed app and sends only synthetic Unicode text, a long body
 and a fresh nonce to `https://httpbingo.org/anything`.
 
@@ -249,6 +258,13 @@ address, parsed USB logs, the nonce marker, raw references and all package
 checksums. Large log/timeline files are streamed. Safari supplies no custom
 application log marker: this proves both evidence sources coexist in one timeline
 and ZIP, with correlation by time remaining inferred. Keep receipts outside Git.
+
+For a session recorded with **Device logs** unchecked, add `--network-only` to the
+verification command. It still requires exact request/response body parity, the
+phone tunnel client address, a nonce marker, raw references and checksums. Its
+report declares `proof_scope: network_only` and makes no USB-log claim. The flag
+rejects sessions that selected device logs; the default verifier still requires
+the complete combined proof.
 
 ### Manually signed physical iPhone fixture
 

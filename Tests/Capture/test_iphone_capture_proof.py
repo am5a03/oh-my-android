@@ -86,8 +86,17 @@ class IPhoneSafariProofTests(unittest.TestCase):
                 archive.writestr(name, data)
         return destination
 
-    def verify(self, package=None, receipt=None, nonce=None, address="10.0.0.1"):
-        return proof.verify(package or self.package(), receipt or self.receipt_path, nonce or self.nonce, False, address)
+    def verify(self, package=None, receipt=None, nonce=None, address="10.0.0.1", network_only=False):
+        return proof.verify(package or self.package(), receipt or self.receipt_path, nonce or self.nonce, False, address, network_only)
+
+    def network_only_files(self):
+        files = dict(self.files)
+        del files["logs/device.log"]
+        manifest = json.loads(files["manifest.json"])
+        manifest["sources"]["logs"] = "not_selected"
+        files["manifest.json"] = json.dumps(manifest).encode()
+        files["timeline/events.jsonl"] = b"".join(json_line(event) for event in self.events if event["source"] != "logs")
+        return files
 
     def test_utf8_long_body_receipt_keeps_exact_bytes_and_private_permissions(self):
         receipt = proof.validate_receipt(self.receipt, self.nonce)
@@ -113,11 +122,39 @@ class IPhoneSafariProofTests(unittest.TestCase):
         result = self.verify()
         self.assertEqual(result["platform"], "iphone")
         self.assertEqual(result["proof_mode"], "safari")
+        self.assertEqual(result["proof_scope"], "combined")
         self.assertEqual(result["request_bytes"], len(self.request))
         self.assertEqual(result["response_sha256"], hashlib.sha256(self.response).hexdigest())
         self.assertEqual(result["parsed_usb_log_events"], 1)
         self.assertEqual(result["timeline_events"], 4)
         self.assertIn("no custom app/request log marker", result["device_log_correlation"])
+
+    def test_network_only_proof_requires_explicit_scope_and_makes_no_usb_claim(self):
+        package = self.package(self.network_only_files())
+        result = self.verify(package=package, network_only=True)
+        self.assertEqual(result["proof_scope"], "network_only")
+        self.assertEqual(result["parsed_usb_log_events"], 0)
+        self.assertEqual(result["sources"]["logs"], "not_selected")
+        self.assertEqual(result["timeline_events"], 3)
+        self.assertIn("Device logs not selected", result["device_log_correlation"])
+        with self.assertRaisesRegex(AssertionError, "missing an evidence source"):
+            self.verify(package=package)  # Default verification remains a combined-source proof.
+
+    def test_network_only_flag_rejects_session_that_selected_logs(self):
+        files = self.network_only_files()
+        manifest = json.loads(files["manifest.json"])
+        manifest["sources"]["logs"] = "observed"
+        files["manifest.json"] = json.dumps(manifest).encode()
+        with self.assertRaisesRegex(AssertionError, "logs not selected"):
+            self.verify(package=self.package(files), network_only=True)
+
+    def test_network_only_scope_keeps_body_marker_and_client_checks(self):
+        files = self.network_only_files()
+        with self.assertRaisesRegex(AssertionError, "phone tunnel address"):
+            self.verify(package=self.package(files), network_only=True, address="10.0.0.2")
+        files["timeline/events.jsonl"] = b"".join(json_line(event) for event in self.events if event["source"] == "network")
+        with self.assertRaisesRegex(AssertionError, "Nonce user marker missing"):
+            self.verify(package=self.package(files), network_only=True)
 
     def test_modified_response_and_saved_digest_are_rejected(self):
         changed = dict(self.receipt, response_body_base64=encoded(json.dumps({"json": json.loads(self.request), "changed": True}).encode()))
