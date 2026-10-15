@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "example.capture-check",
+  "version": 1,
+  "title": "Capture the missing content request",
+  "platform": "android",
+  "application_id": "dev.mobilecapture.proof",
+  "instructions": "Use the engineer-prepared test build. Sign in through the app's normal test-account workflow.",
+  "supported_builds": ["Engineer-provided test build"],
+  "sources": { "logs": "required", "network": "required" },
+  "log_limits": {
+    "max_bytes": 20000000,
+    "max_records": 25000,
+    "max_duration_seconds": 120
+  },
+  "suggested_filters": ["capture-proof"],
+  "evidence_hints": {
+    "log_tokens": ["capture-proof"],
+    "request_hosts": ["example.com"]
+  },
+  "reproduction_steps": [
+    "Start recording, then open the selected test app.",
+    "Open the screen with the missing content and mark the moment it happens.",
+    "Stop recording and review the evidence coverage before exporting the ZIP."
+  ],
+  "engineer_note": "Example only: replace the app, build and evidence hints for the real task. This file installs nothing and contains no account credentials."
+}
