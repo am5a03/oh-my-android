@@ -163,6 +163,118 @@ struct NativeTimelineTests {
         print("Native timeline checks passed (schema parity, body search, durable ingress, bounded paging, mutation rebuilds, partial lines, markers, safe files and streaming export).")
     }
 
+    @Test static func liveIngestionKeepsNetworkAndMarkersResponsiveWithoutLosingEvidence() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        try fixture.state(phase: "recording")
+        let logLine = "1792035900.123456  12  34 I Flood: " + String(repeating: "retained evidence ", count: 12) + "\r\n"
+        let rawLogs = Data(String(repeating: logLine, count: 16_000).utf8)
+        try fixture.write("logs/device.log", rawLogs)
+        try fixture.writeJSONLines("network/events.jsonl", [["timestamp": "2026-10-15T03:45:00Z", "kind": "response", "summary": "200 ad response",
+            "detail": ["response_body": ["encoding": "utf-8", "text": "complete response body", "bytes": 22]]]])
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        let initial = try await store.refresh(mode: .live)
+        let initialLogs = initial.counts["logs", default: 0]
+        #expect(initialLogs > 0 && initialLogs < 16_000)
+        #expect(initial.counts["network"] == 1)
+        #expect(initial.pendingBytes > 0)
+
+        let clickedAt = Date(timeIntervalSince1970: 1_792_0316_000.125)
+        let marker = try await store.appendMarker(text: "Tapped while device logs are catching up", at: clickedAt)
+        #expect(marker.timestamp == NativeTimelineNormalizer.iso(1_792_0316_000_125_000))
+        #expect(try await store.event(id: marker.id)?.summary == marker.summary)
+        var query = NativeTimelineQuery(); query.source = "logs"
+        #expect(try await store.query(query).matchingCount == initialLogs)
+        query.source = "network"
+        let request = try #require(try await store.query(query).rows.first)
+        #expect(try await store.event(id: request.id)?.bodies.first?.content == "complete response body")
+
+        let second = try await store.refresh(mode: .live)
+        #expect(second.counts["logs", default: 0] > initialLogs)
+        #expect(second.counts["logs", default: 0] < 16_000)
+        #expect(second.counts["markers"] == 1)
+        #expect(second.pendingBytes < initial.pendingBytes)
+
+        // A same-inode rewrite must still invalidate cursors even when only a prefix was indexed.
+        let handle = try FileHandle(forWritingTo: fixture.url("logs/device.log"))
+        try handle.write(contentsOf: Data(" ".utf8)); try handle.close()
+        let rebuilt = try await store.refresh(mode: .live)
+        #expect(rebuilt.generation > second.generation)
+        #expect(rebuilt.counts["network"] == 1 && rebuilt.counts["markers"] == 1)
+        #expect(rebuilt.pendingBytes > 0)
+
+        // Stopped refresh ignores the UI budget and exports every byte/record in source-time order.
+        try fixture.state(phase: "stopping")
+        let completed = try await store.refresh(collectorsStopped: true, mode: .live)
+        #expect(completed.counts == ["logs": 16_000, "network": 1, "markers": 1])
+        #expect(completed.pendingBytes == 0)
+        try await fixture.assertParity(store)
+        var expected = rawLogs; expected[0] = 32
+        #expect(try Data(contentsOf: fixture.url("logs/device.log")) == expected)
+    }
+
+    @Test static func liveBudgetPreservesSplitCRLFAndLargeNetworkBodies() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        try fixture.state(phase: "recording")
+        let prefix = "1792035900.123456  1  2 I Boundary: "
+        let line = prefix + String(repeating: "x", count: 1_048_575 - prefix.utf8.count) + "\r\n"
+        try fixture.write("logs/device.log", Data(line.utf8))
+        let body = String(repeating: "large body remains whole 🧭 ", count: 50_000)
+        try fixture.writeJSONLines("network/events.jsonl", [["timestamp": "2026-10-15T03:45:00Z", "kind": "response", "summary": "large ad response",
+            "detail": ["response_body": ["encoding": "utf-8", "text": body, "bytes": body.utf8.count]]]])
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        let first = try await store.refresh(mode: .live)
+        #expect(first.counts["logs"] == 0) // Terminal CR is held for the following LF.
+        #expect(first.counts["network"] == 0) // A partial JSON record is never a truncated event.
+        #expect(first.pendingBytes > 0)
+        var latest = first
+        for _ in 0..<4 where latest.pendingBytes > 0 { latest = try await store.refresh(mode: .live) }
+        #expect(latest.counts["logs"] == 1 && latest.counts["network"] == 1)
+        #expect(latest.pendingBytes == 0)
+        var query = NativeTimelineQuery(); query.source = "network"
+        let row = try #require(try await store.query(query).rows.first)
+        #expect(try await store.event(id: row.id)?.bodies.first?.content == body)
+        try await fixture.assertParity(store)
+    }
+
+    @Test static func markerAfterMetadataChangeDoesNotLoseOtherSourcesOnCompleteRefresh() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        try fixture.state(phase: "recording")
+        let rawLogs = Data(String(repeating: "1792035900.123456  1  2 I Metadata: retained device log\n", count: 5).utf8)
+        try fixture.write("logs/device.log", rawLogs)
+        try fixture.writeJSONLines("network/events.jsonl", [
+            ["timestamp": "2026-10-15T03:45:00Z", "kind": "request", "summary": "GET ad request"],
+            ["timestamp": "2026-10-15T03:45:01Z", "kind": "response", "summary": "200 ad response",
+             "detail": ["response_body": ["encoding": "utf-8", "text": "preserved body", "bytes": 14]]]
+        ])
+        let rawNetwork = try Data(contentsOf: fixture.url("network/events.jsonl"))
+        let store = try NativeTimelineStore(sessionDirectory: fixture.root)
+        _ = try await store.refresh()
+        _ = try await store.appendMarker(text: "Before calibration change")
+        let before = try await store.query(NativeTimelineQuery())
+        let originalIDs = Set(before.rows.map(\.id))
+
+        var metadata = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: fixture.url("session.json"))) as? [String: Any])
+        metadata["clock_calibration"] = ["logs": ["offset_ms": 500.25, "uncertainty_ms": 100, "method": "updated probe"],
+                                          "network": ["offset_ms": 0, "uncertainty_ms": 1, "method": "host_clock"]]
+        try fixture.write("session.json", JSONSerialization.data(withJSONObject: metadata))
+        let marker = try await store.appendMarker(text: "After calibration change")
+        #expect(try await store.event(id: marker.id)?.summary == "After calibration change")
+
+        metadata["phase"] = "stopping"
+        try fixture.write("session.json", JSONSerialization.data(withJSONObject: metadata))
+        let completed = try await store.refresh(collectorsStopped: true)
+        #expect(completed.generation > before.generation)
+        #expect(completed.counts == ["logs": 5, "network": 2, "markers": 2])
+        #expect(completed.pendingBytes == 0)
+        #expect(originalIDs.isSubset(of: Set(try await store.query(NativeTimelineQuery()).rows.map(\.id))))
+        #expect(try Data(contentsOf: fixture.url("logs/device.log")) == rawLogs)
+        #expect(try Data(contentsOf: fixture.url("network/events.jsonl")) == rawNetwork)
+        try await fixture.assertParity(store)
+    }
+
     @Test static func timestampAndMalformedEvidenceParity() async throws {
         let fixture = try Fixture(); defer { fixture.remove() }
         try fixture.state(phase: "saved")

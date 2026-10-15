@@ -8,6 +8,9 @@ import SQLite3
 actor NativeTimelineStore {
     private let files: NativeTimelineFiles
     private let database: NativeTimelineDatabase
+    private var pendingBytes: Int64 = 0
+    private var iPhoneSessionStartedAt: Date?
+    private var preparedCounterIndex = false
 
     init(sessionDirectory: URL) throws {
         let files = try NativeTimelineFiles(directory: sessionDirectory)
@@ -42,11 +45,25 @@ actor NativeTimelineStore {
 
     /// Only new complete records are parsed. Prefix hashes detect in-place writes, not just truncation
     /// or inode replacement; verification streams bytes with bounded memory and never reparses them.
-    func refresh(collectorsStopped: Bool = false) throws -> NativeTimelineSnapshot {
+    func refresh(collectorsStopped: Bool = false, mode: NativeTimelineRefreshMode = .complete) throws -> NativeTimelineSnapshot {
+        try refreshSources(collectorsStopped: collectorsStopped, mode: mode, sources: NativeTimelineNormalizer.sources)
+        return try snapshot()
+    }
+
+    private func refreshSources(collectorsStopped: Bool = false, mode: NativeTimelineRefreshMode, sources: [(String, String)]) throws {
+        if !preparedCounterIndex {
+            // Migrate on this actor, not in the synchronous initializer called by the UI.
+            // Observed-log counts must not fetch every full event during large live captures.
+            try database.execute("CREATE INDEX IF NOT EXISTS source_kind ON events(source,kind)")
+            preparedCounterIndex = true
+        }
         let newState = try readState()
-        let metadata = ["started_at": newState["started_at"] ?? NSNull(), "clock_calibration": newState["clock_calibration"] ?? NSNull()]
+        let metadata: [String: Any] = ["started_at": newState["started_at"] ?? NSNull(), "clock_calibration": newState["clock_calibration"] ?? NSNull(),
+            "platform": newState["platform"] ?? NSNull(), "normalizer_version": 2]
         let fingerprint = Self.digest(try NativeTimelineNormalizer.jsonData(metadata))
         let phase = newState["phase"] as? String ?? ""
+        iPhoneSessionStartedAt = newState["platform"] as? String == "iphone"
+            ? NativeTimelineNormalizer.timestamp(newState["started_at"]).map { Date(timeIntervalSince1970: Double($0) / 1_000_000) } : nil
         try database.execute("BEGIN IMMEDIATE")
         do {
             // The host can flush final unterminated records before it publishes a terminal phase.
@@ -54,10 +71,13 @@ actor NativeTimelineStore {
             let tailWasFinalized = try database.text("SELECT value FROM metadata WHERE key='collectors_stopped'") == "1"
             let stopped = collectorsStopped || phase == "stopping" && tailWasFinalized
             let active = ["preparing", "recording", "stopping"].contains(phase) && !stopped
+            let bounded = mode == .live && active
             let previousFingerprint = try database.text("SELECT value FROM metadata WHERE key='normalization'")
             var rebuild = previousFingerprint != nil && previousFingerprint != fingerprint
             var inputs: [Input] = []
-            for (source, path) in NativeTimelineNormalizer.sources {
+            // Index sparse investigative evidence before device-log floods. IDs/order remain source based.
+            let orderedSources = bounded ? sources.sorted { sourcePriority($0.0) < sourcePriority($1.0) } : sources
+            for (source, path) in orderedSources {
                 let file = try files.evidence(path), info = try file?.information(), position = try position(for: path)
                 var hash = SHA256()
                 if let position {
@@ -77,15 +97,25 @@ actor NativeTimelineStore {
             for input in inputs {
                 guard let file = input.file, let info = input.info else { continue }
                 try ingest(input, file: file, info: info, position: rebuild ? nil : input.position,
-                           hash: rebuild ? SHA256() : input.prefix, active: active, state: newState)
+                           hash: rebuild ? SHA256() : input.prefix, active: active, state: newState,
+                           byteBudget: bounded ? (input.source == "marker" ? 131_072 : 1_048_576) : nil)
             }
             try database.execute("INSERT OR REPLACE INTO metadata VALUES('normalization',?)", [.text(fingerprint)])
             try database.execute("INSERT OR REPLACE INTO metadata VALUES('collectors_stopped',?)", [.text(stopped ? "1" : "0")])
             try database.execute("COMMIT")
-            return try snapshot()
+            pendingBytes = try pendingEvidenceBytes()
         } catch {
             try? database.execute("ROLLBACK")
             throw error
+        }
+    }
+
+    private func sourcePriority(_ source: String) -> Int { source == "marker" ? 0 : source == "network" ? 1 : 2 }
+
+    private func pendingEvidenceBytes() throws -> Int64 {
+        try NativeTimelineNormalizer.sources.reduce(0) { total, input in
+            guard let file = try files.evidence(input.1) else { return total }
+            return total + max(0, try file.information().st_size - (position(for: input.1)?.offset ?? 0))
         }
     }
 
@@ -156,14 +186,14 @@ actor NativeTimelineStore {
         }
     }
 
-    func appendMarker(text: String) throws -> CaptureEvent {
+    func appendMarker(text: String, at date: Date = Date()) throws -> CaptureEvent {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NativeTimelineError.message("Type a marker note first.") }
         let current = try readState()
         guard ["preparing", "recording"].contains(current["phase"] as? String ?? "") else {
             throw NativeTimelineError.message("Start recording before adding a marker.")
         }
         let sourceID = UUID().uuidString.lowercased()
-        let micros = Int64((Date().timeIntervalSince1970 * 1_000_000).rounded(.toNearestOrEven))
+        let micros = Int64((date.timeIntervalSince1970 * 1_000_000).rounded(.toNearestOrEven))
         let timestamp = NativeTimelineNormalizer.iso(micros)
         let marker: [String: Any] = ["id": sourceID, "timestamp": timestamp, "original_timestamp": timestamp,
             "received_at": timestamp, "source": "marker", "kind": "marker", "summary": text,
@@ -171,7 +201,8 @@ actor NativeTimelineStore {
         var data = try NativeTimelineNormalizer.jsonData(marker)
         data.append(10)
         try files.appendMarker(data)
-        _ = try refresh()
+        // Durability and acknowledgment never wait for the device-log backlog to be parsed.
+        try refreshSources(mode: .complete, sources: [("marker", "timeline/markers.jsonl")])
         let id = try database.text("SELECT id FROM events WHERE source='marker' AND instr(event,?)>0 ORDER BY sequence DESC LIMIT 1", [.text(sourceID)])
         guard let id, let event = try event(id: id) else { throw NativeTimelineError.message("The saved marker could not be read back.") }
         return event
@@ -194,11 +225,12 @@ actor NativeTimelineStore {
     }
 
     private func ingest(_ input: Input, file: NativeTimelineFile, info: stat, position: Position?, hash: SHA256,
-                        active: Bool, state: [String: Any]) throws {
+                        active: Bool, state: [String: Any], byteBudget: Int? = nil) throws {
         var hash = hash, offset = position?.offset ?? 0, line = position?.line ?? 0
         var buffer = position?.pending ?? Data(), scan = max(0, (position?.pending.count ?? 0) - 1)
-        while offset < info.st_size {
-            let chunk = try file.read(offset: offset, count: Int(min(1024 * 1024, info.st_size - offset)))
+        let end = byteBudget.map { offset + min(Int64($0), info.st_size - offset) } ?? info.st_size
+        while offset < end {
+            let chunk = try file.read(offset: offset, count: Int(min(1024 * 1024, end - offset)))
             guard !chunk.isEmpty else { throw NativeTimelineError.message("Evidence changed while reading. Refresh the timeline again.") }
             hash.update(data: chunk)
             offset += Int64(chunk.count)
@@ -248,7 +280,8 @@ actor NativeTimelineStore {
 
     private func insertRecord(source: String, path: String, line: Int64, raw: Data, state: [String: Any]) throws {
         guard raw.contains(where: { ![9, 10, 11, 12, 13, 32].contains($0) }) else { return }
-        let event = try NativeTimelineNormalizer.normalize(source: source, path: path, line: line, raw: raw, state: state)
+        let event = try NativeTimelineNormalizer.normalize(source: source, path: path, line: line, raw: raw, state: state,
+                                                          iPhoneSessionStartedAt: iPhoneSessionStartedAt)
         let detail = event["detail"] as? [String: Any] ?? [:]
         let summary = event["summary"] as? String ?? "", kind = event["kind"] as? String ?? "", rawRef = event["raw_ref"] as? String ?? ""
         let detailData = try NativeTimelineNormalizer.jsonData(detail)
@@ -312,7 +345,8 @@ actor NativeTimelineStore {
             latestSequence: try database.scalar("SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='events'),0)"),
             generation: Int64(try database.text("SELECT value FROM metadata WHERE key='generation'") ?? "1") ?? 1,
             networkDiagnostics: diagnostics,
-            observedLogEvents: Int(try database.scalar("SELECT COUNT(*) FROM events WHERE source='logs' AND kind != 'collector_status'")))
+            observedLogEvents: Int(try database.scalar("SELECT COUNT(*) FROM events WHERE source='logs' AND kind != 'collector_status'")),
+            pendingBytes: pendingBytes)
     }
 
     private func filter(_ query: NativeTimelineQuery) -> (String, [NativeTimelineSQLValue]) {

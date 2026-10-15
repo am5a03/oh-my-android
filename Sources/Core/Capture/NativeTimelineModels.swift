@@ -41,6 +41,15 @@ struct NativeTimelineSnapshot: Sendable {
     let generation: Int64
     let networkDiagnostics: [String: Int]
     var observedLogEvents: Int? = nil
+    /// Raw bytes not yet read by the disposable index; collectors retain the complete evidence.
+    var pendingBytes: Int64 = 0
+}
+
+enum NativeTimelineRefreshMode: Sendable {
+    case complete
+    /// Commit at most 1 MiB per log/network source and 128 KiB of markers while recording.
+    /// Each call returns actor time to queries and marker saves before the next batch.
+    case live
 }
 
 struct NativeTimelinePage: Sendable {

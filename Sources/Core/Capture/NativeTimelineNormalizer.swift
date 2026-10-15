@@ -16,13 +16,17 @@ enum NativeTimelineNormalizer {
         text.precomposedStringWithCanonicalMapping.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
     }
 
-    static func normalize(source: String, path: String, line: Int64, raw: Data, state: [String: Any]) throws -> [String: Any] {
+    static func normalize(source: String, path: String, line: Int64, raw: Data, state: [String: Any], iPhoneSessionStartedAt: Date? = nil) throws -> [String: Any] {
+        func iPhoneLogValue() -> [String: Any]? {
+            if let iPhoneSessionStartedAt { return IPhoneLogFormat.parse(raw, sessionStartedAt: iPhoneSessionStartedAt) }
+            return IPhoneLogFormat.parse(raw, sessionStartedAt: state["started_at"] as? String ?? "")
+        }
         let value: [String: Any]
         if source == "logs", state["platform"] as? String == "iphone", IPhoneLogFormat.isStatusLine(raw) {
             value = ["kind": "collector_status", "summary": String(decoding: raw, as: UTF8.self),
                 "detail": ["format": "iphone_collector_status", "message": "USB collector connection status; not an observed device log"]]
         } else if source == "logs", state["platform"] as? String == "iphone",
-           let parsed = IPhoneLogFormat.parse(raw, sessionStartedAt: state["started_at"] as? String ?? "") {
+           let parsed = iPhoneLogValue() {
             value = parsed
         } else {
             value = source == "logs" ? logValue(raw) : jsonValue(raw, source: source)

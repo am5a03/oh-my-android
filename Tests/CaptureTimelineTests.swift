@@ -57,6 +57,8 @@ struct CaptureTimelineTests {
         try require(store.isViewPaused && store.visibleEvents.map(\.id) == originalIDs, "pause preserves reading position")
         store.markerText = "Tapped the synthetic ad"
         await store.addMarker()
+        try require(!store.isAddingMarker && store.markerReceipt != nil, "durable marker acknowledgment releases composer immediately")
+        try await wait { store.session?.counts["markers"] == 1 }
         try require(store.markerReceipt != nil && store.session?.counts["markers"] == 1, "native marker saves during paused display")
         await store.clearView()
         try require(store.visibleEvents.isEmpty && store.timeline?.totalCount == 2_001, "clear only hides the view")
@@ -102,7 +104,44 @@ struct CaptureTimelineTests {
         store.search = "--not-a-command-option"
         try await wait { store.timelineMatchesFilters && !store.isBusy && !store.isLoadingTimeline }
         try require(store.visibleEvents.isEmpty && store.error == nil, "search text starting with dashes is passed literally")
+        try await highVolumeLiveCapture()
         print("Capture timeline store checks passed (bounded held view, full-session filters, body search, pause/clear, native markers, lazy details, paging and ordering).")
+    }
+
+    @MainActor
+    static func highVolumeLiveCapture() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("capture-backlog-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("network"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("logs"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var state: [String: Any] = ["id": "backlog-test", "directory": directory.path, "platform": "android", "device_id": "synthetic",
+            "device_name": "Synthetic", "started_at": "2026-10-15T00:00:00Z", "phase": "recording",
+            "sources": ["logs": "observed", "network": "observed"], "warnings": [], "routing_restored": true]
+        try JSONSerialization.data(withJSONObject: state).write(to: directory.appendingPathComponent("session.json"))
+        let rawLogs = Data(String(repeating: "1792022460.000  1  2 I Noise: " + String(repeating: "saved log evidence ", count: 12) + "\n", count: 6_000).utf8)
+        try rawLogs.write(to: directory.appendingPathComponent("logs/device.log"))
+        try Data("{\"kind\":\"request\",\"timestamp\":\"2026-10-15T00:00:01Z\",\"summary\":\"GET synthetic ad\"}\n".utf8)
+            .write(to: directory.appendingPathComponent("network/events.jsonl"))
+        let store = CaptureStore()
+        await store.loadSession(at: directory)
+        try require(store.pendingTimelineBytes > 0 && store.session?.counts["network"] == 1, "network is indexed while device logs catch up")
+        try require(store.timelineCountText.contains("Indexing saved evidence"), "backlog is visible instead of claiming a complete captured count")
+        store.markerText = "Tapped during log backlog"
+        let clicked = Date()
+        await store.addMarker()
+        try require(!store.isAddingMarker && store.markerReceipt != nil && store.markerText.isEmpty, "marker saves independently of log backlog")
+        let markerData = try String(contentsOf: directory.appendingPathComponent("timeline/markers.jsonl"), encoding: .utf8)
+        try require(markerData.contains("Tapped during log backlog"), "marker is durable before acknowledgment")
+        let marker = try JSONSerialization.jsonObject(with: Data(markerData.utf8)) as? [String: Any]
+        if let micros = NativeTimelineNormalizer.timestamp(marker?["timestamp"]) {
+            try require(abs(Double(micros) / 1_000_000 - clicked.timeIntervalSince1970) < 2, "marker records click time")
+        } else { throw AppError("Marker timestamp missing") }
+        try await wait { store.pendingTimelineBytes == 0 }
+        try require(store.session?.counts["logs"] == 6_000, "fast catchup polling indexes the complete saved backlog")
+        try require(try Data(contentsOf: directory.appendingPathComponent("logs/device.log")) == rawLogs, "UI ingestion leaves raw logs intact")
+        state["phase"] = "saved"
+        try JSONSerialization.data(withJSONObject: state).write(to: directory.appendingPathComponent("session.json"), options: .atomic)
+        try await wait { store.session?.isActive == false }
     }
 
     @MainActor

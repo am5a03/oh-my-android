@@ -83,6 +83,7 @@ final class CaptureStore {
     private(set) var jumpToLatestToken: UInt64 = 0
     private(set) var markerReceipt: String?
     private(set) var presentationHint: String?
+    private(set) var pendingTimelineBytes: Int64 = 0
     private(set) var followLatest = true
     var wrapLines = false
     var selectedDeviceID = "" {
@@ -150,7 +151,8 @@ final class CaptureStore {
     var hasNewerEvents: Bool { timelineMatchesFilters && windowHasNewer }
     var timelineCountText: String {
         guard timelineMatchesFilters, let timeline else { return session == nil ? "0 events" : "Loading matching events…" }
-        return "\(events.count) shown · \(timeline.matchingCount) matching · \(timeline.totalCount) captured"
+        return "\(events.count) shown · \(timeline.matchingCount) matching · \(timeline.totalCount) "
+            + (pendingTimelineBytes > 0 ? "indexed · Indexing saved evidence…" : "captured")
     }
     var activeTargetName: String {
         if isStarting { return selectedDevice?.name ?? "Preparing selected device" }
@@ -316,16 +318,19 @@ final class CaptureStore {
 
     func addMarker() async {
         guard !isBusy, !isAddingMarker, session?.phase == "recording", let index, let text = nonempty(markerText) else { return }
+        let clickedAt = Date()
         isAddingMarker = true
         let token = sessionToken
         defer { isAddingMarker = false }
         do {
-            let event = try await index.appendMarker(text: text)
+            let event = try await index.appendMarker(text: text, at: clickedAt)
             guard token == sessionToken else { return }
             if markerText.trimmingCharacters(in: .whitespacesAndNewlines) == text { markerText = "" }
             let hidden = isViewPaused || !["all", "marker"].contains(sourceFilter) || !search.isEmpty || !followLatest
             markerReceipt = "Marker saved at \(event.timestamp)." + (hidden ? " It may be outside the current view or filters." : "")
-            await refreshTimeline(mode: .poll)
+            // The durable marker receipt releases the composer and Stop immediately. Presentation
+            // can catch up independently without making a saved marker look like an unfinished save.
+            Task { [weak self] in await self?.refreshTimeline(mode: .poll) }
         } catch { recordFailure(error) }
     }
 
@@ -407,6 +412,7 @@ final class CaptureStore {
         windowHasOlder = false; windowHasNewer = false
         hiddenThroughSequence = nil; pauseThroughSequence = nil; isViewPaused = false
         heldMatchingCount = nil; followLatest = true; presentationHint = nil; markerReceipt = nil
+        pendingTimelineBytes = 0
         // Query changes are scheduled only once the new index is installed.
         search = ""; sourceFilter = "all"
     }
@@ -417,7 +423,8 @@ final class CaptureStore {
         let token = sessionToken
         pollingTask = Task { [weak self] in
             while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                let delay: Duration = (self?.pendingTimelineBytes ?? 0) > 0 ? .milliseconds(100) : .seconds(2)
+                do { try await Task.sleep(for: delay) } catch { return }
                 guard let self, token == self.sessionToken, self.session?.isActive == true else { return }
                 await self.refreshTimeline(mode: .poll)
             }
@@ -484,12 +491,13 @@ final class CaptureStore {
         if mode != .poll { isLoadingTimeline = true }
         defer { refreshInFlight = false; if revision == queryRevision { isLoadingTimeline = false } }
         do {
-            let snapshot = try await index.refresh()
+            let snapshot = try await index.refresh(mode: .live)
             let stateData = try await index.sessionData()
             guard token == sessionToken, revision == queryRevision, !Task.isCancelled else { return }
             let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
             let metadata = try decoder.decode(CaptureSession.self, from: stateData)
             session = metadata.merging(snapshot)
+            pendingTimelineBytes = snapshot.pendingBytes
             // A poll can discover Stop completed. Let this final query finish before the loop exits.
             if !metadata.isActive { pollingTask = nil }
             var changed = false
@@ -572,8 +580,9 @@ final class CaptureStore {
         do {
             if isViewPaused { pauseThroughSequence = nil; isViewPaused = false }
             else {
-                let snapshot = try await index.refresh()
+                let snapshot = try await index.refresh(mode: .live)
                 guard token == sessionToken else { return }
+                pendingTimelineBytes = snapshot.pendingBytes
                 pauseThroughSequence = snapshot.latestSequence; isViewPaused = true
             }
             queryRevision &+= 1
@@ -585,8 +594,9 @@ final class CaptureStore {
         guard let index else { return }
         let token = sessionToken
         do {
-            let snapshot = try await index.refresh()
+            let snapshot = try await index.refresh(mode: .live)
             guard token == sessionToken else { return }
+            pendingTimelineBytes = snapshot.pendingBytes
             hiddenThroughSequence = snapshot.latestSequence
             queryRevision &+= 1
             await refreshTimeline(mode: .query)
