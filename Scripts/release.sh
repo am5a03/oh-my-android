@@ -1,130 +1,81 @@
 #!/bin/zsh
-# Builds a Release app, signs it with your Developer ID, notarizes, staples, zips, and writes the
-# Homebrew cask with the zip's sha256 and the signed Sparkle appcast.
-#
-# One-time setup (asks for an app-specific password from appleid.apple.com):
-#   xcrun notarytool store-credentials ohmyandroid --apple-id <apple-id-email> --team-id <TEAM_ID>
-# Sparkle's private EdDSA key must be in the login Keychain (generate_keys; its public key is SUPublicEDKey).
-# Usage:
-#   TEAM_ID=<your team id> [NOTES=notes.md] Scripts/release.sh [--skip-notarize]
-# NOTES: Markdown release notes, shown in the update window (and usable for `gh release create --notes-file`).
+# Prepare a local, self-contained capture artifact. Nothing is published to GitHub.
+# Development: CAPTURE_DEPENDENCY_CACHE=/path/to/cache Scripts/release.sh --development
+# Release: TEAM_ID=... CAPTURE_DEPENDENCY_CACHE=/path/to/cache Scripts/release.sh [--skip-notarize]
 set -euo pipefail
-NOTES=${NOTES:+${NOTES:A}}   # absolute, before the cd
 cd "$(dirname "$0")/.."
-APP=OhMyAndroid              # project, scheme, zip name
-BUNDLE="Oh My Android.app"
-TEAM_ID=${TEAM_ID:?Set TEAM_ID to your Apple Developer team id}
-NOTARY_PROFILE=${NOTARY_PROFILE:-ohmyandroid}
-REPO=${REPO:-ateymoori/oh-my-android}
-BUILD=build/DerivedData/Build/Products/Release
-SPARKLE_BIN=build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin
-[[ -z "$NOTES" || -f "$NOTES" ]] || { echo "No release notes at $NOTES." >&2; exit 1; }
-
-xcodegen generate >/dev/null
-rm -rf "$BUILD/$BUNDLE"   # never ship a stale app from an earlier build
-mkdir -p build
-if ! xcodebuild -project $APP.xcodeproj -scheme $APP -configuration Release -derivedDataPath build/DerivedData \
-    DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_IDENTITY="Developer ID Application" build > build/release.log 2>&1; then
-  grep -E "error:" build/release.log || tail -20 build/release.log
-  echo "Build failed. Full log: build/release.log" >&2
-  exit 1
+MODE=release
+NOTARIZE=1
+for argument in "$@"; do
+  case "$argument" in
+    --development) MODE=development; NOTARIZE=0 ;;
+    --skip-notarize) NOTARIZE=0 ;;
+    *) print -u2 "Usage: Scripts/release.sh [--development | --skip-notarize]"; exit 2 ;;
+  esac
+done
+CAPTURE_DEPENDENCY_CACHE=${CAPTURE_DEPENDENCY_CACHE:-$HOME/Library/Caches/MobileCapture/Dependencies}
+[[ -d "$CAPTURE_DEPENDENCY_CACHE" ]] || { print -u2 "Prepare the pinned dependency cache first. See docs/CAPTURE-DISTRIBUTION.md."; exit 1; }
+IDENTITY=-
+if [[ "$MODE" == release ]]; then
+  TEAM_ID=${TEAM_ID:?Set TEAM_ID to your own Apple Developer team ID, or use --development}
+  IDENTITY=$(/usr/bin/security find-identity -v -p codesigning | /usr/bin/awk -v team="($TEAM_ID)" '/Developer ID Application/ && index($0, team) { print $2; exit }')
+  [[ -n "$IDENTITY" ]] || { print -u2 "No Developer ID Application identity for the selected team. iOS development/distribution certificates cannot sign this Mac release."; exit 1; }
 fi
 
-# Xcode signs the embedded Sparkle.framework but not its helpers, which ship ad-hoc signed.
-# Sign them inside-out with the Developer ID, then re-seal the app (entitlements kept).
-IDENTITY=$(security find-identity -v -p codesigning | awk -v team="($TEAM_ID)" '/Developer ID Application/ && index($0, team) { print $2; exit }')
-[[ -n "$IDENTITY" ]] || { echo "No Developer ID Application identity for team $TEAM_ID." >&2; exit 1; }
-SPARKLE="$BUILD/$BUNDLE/Contents/Frameworks/Sparkle.framework/Versions/B"
-SIGN=(codesign --force --timestamp --options runtime --sign "$IDENTITY")
+DERIVED="build/CaptureDistribution/$MODE"
+BUILD="$DERIVED/Build/Products/Release"
+BUNDLE="Oh My Android.app"
+mkdir -p "$DERIVED"
+xcodegen generate > "$DERIVED/generate.log" 2>&1
+if ! xcodebuild -project OhMyAndroid.xcodeproj -scheme OhMyAndroid -configuration Release \
+    -derivedDataPath "$DERIVED" ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
+    build > "$DERIVED/build.log" 2>&1; then
+  /usr/bin/tail -30 "$DERIVED/build.log" >&2
+  exit 1
+fi
+VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$BUILD/$BUNDLE/Contents/Info.plist")
+STAMP=$(/bin/date -u +%Y%m%d-%H%M%S)
+DESTINATION="dist/MobileCapture-$VERSION-arm64-$MODE-$STAMP"
+[[ ! -e "$DESTINATION" ]] || { print -u2 "Artifact destination already exists: $DESTINATION"; exit 1; }
+mkdir -p "$DESTINATION"
+/usr/bin/ditto "$BUILD/$BUNDLE" "$DESTINATION/$BUNDLE"
+APP="$PWD/$DESTINATION/$BUNDLE"
+swift Scripts/bundle-capture-dependencies.swift install --app "$APP" \
+  --cache-root "$CAPTURE_DEPENDENCY_CACHE" --sign "$IDENTITY"
+
+SIGN=(/usr/bin/codesign --force --sign "$IDENTITY")
+if [[ "$MODE" == release ]]; then SIGN+=(--options runtime --timestamp)
+else SIGN+=(--options 0 --timestamp=none)
+fi
+# Sign inside out; dependency packaging already signed every engine code object with this identity.
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
 "${SIGN[@]}" "$SPARKLE/XPCServices/Installer.xpc"
 "${SIGN[@]}" --preserve-metadata=entitlements "$SPARKLE/XPCServices/Downloader.xpc"
 "${SIGN[@]}" "$SPARKLE/Autoupdate"
 "${SIGN[@]}" "$SPARKLE/Updater.app"
-"${SIGN[@]}" "$BUILD/$BUNDLE/Contents/Frameworks/Sparkle.framework"
-"${SIGN[@]}" --preserve-metadata=entitlements,requirements,flags "$BUILD/$BUNDLE"
+"${SIGN[@]}" "$APP/Contents/Frameworks/Sparkle.framework"
+for helper in ohmyandroid-mcp mobile-capture-host mobile-capture-proxy; do
+  "${SIGN[@]}" "$APP/Contents/MacOS/$helper"
+done
+"${SIGN[@]}" --entitlements Sources/App/OhMyAndroid.entitlements "$APP"
+/usr/bin/codesign --verify --deep --strict "$APP"
+swift Scripts/bundle-capture-dependencies.swift smoke --app "$APP" --cache-root "$CAPTURE_DEPENDENCY_CACHE"
+Scripts/test-mcp.py "$APP/Contents/MacOS/ohmyandroid-mcp"
 
-VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$BUILD/$BUNDLE/Contents/Info.plist")
-ZIP=$APP-$VERSION.zip
-
-# Notarization requires these; fail here instead of after a 5-minute upload.
-# (Captured first: `grep -q` in a pipe exits early and trips pipefail.)
-ENTITLEMENTS=$(codesign -d --entitlements - "$BUILD/$BUNDLE" 2>/dev/null)
-SIGNATURE=$(codesign -dvv "$BUILD/$BUNDLE" 2>&1)
-[[ "$ENTITLEMENTS" != *get-task-allow* ]] || { echo "get-task-allow is set; notarization would reject the app." >&2; exit 1; }
-[[ "$SIGNATURE" == *$'\n'Timestamp=* ]] || { echo "Signature has no secure timestamp." >&2; exit 1; }
-MCP="$BUILD/$BUNDLE/Contents/MacOS/ohmyandroid-mcp"
-MCP_SIGNATURE=$(codesign -dvv "$MCP" 2>&1)
-[[ "$MCP_SIGNATURE" == *$'\n'Timestamp=* && "$MCP_SIGNATURE" == *runtime* ]] || { echo "MCP server lacks timestamp or hardened runtime." >&2; exit 1; }
-codesign --verify --deep --strict "$BUILD/$BUNDLE"
-Scripts/test-mcp.py "$MCP"
-
-rm -rf dist && mkdir -p dist
-cp -R "$BUILD/$BUNDLE" dist/
-cd dist
-ditto -c -k --keepParent "$BUNDLE" "$ZIP"
-if [[ "${1:-}" != "--skip-notarize" ]]; then
-  xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
-  xcrun stapler staple "$BUNDLE"
-  rm "$ZIP" && ditto -c -k --keepParent "$BUNDLE" "$ZIP"   # re-zip with the ticket stapled
-  spctl -a -vv "$BUNDLE"
+ZIP="MobileCapture-$VERSION-arm64-$MODE.zip"
+(cd "$DESTINATION" && /usr/bin/ditto -c -k --keepParent "$BUNDLE" "$ZIP")
+if (( NOTARIZE )); then
+  xcrun notarytool submit "$DESTINATION/$ZIP" --keychain-profile "${NOTARY_PROFILE:-mobile-capture}" --wait
+  xcrun stapler staple "$APP"
+  /bin/rm "$DESTINATION/$ZIP"
+  (cd "$DESTINATION" && /usr/bin/ditto -c -k --keepParent "$BUNDLE" "$ZIP")
+  /usr/sbin/spctl -a -vv "$APP"
 fi
-
-# Sparkle feed: one item, EdDSA-signed zip and feed. Uploaded with each release as appcast.xml;
-# the app reads it from releases/latest/download.
-# In-app updates download a copy with its own name, so the download badge counts installs only.
-UPDATE_ZIP=$APP-$VERSION-update.zip
-cp "$ZIP" "$UPDATE_ZIP"
-mkdir updates && cp "$UPDATE_ZIP" updates/
-[[ -z "$NOTES" ]] || cp "$NOTES" "updates/${UPDATE_ZIP%.zip}.md"
-"../$SPARKLE_BIN/generate_appcast" --maximum-versions 1 --embed-release-notes \
-  --download-url-prefix "https://github.com/$REPO/releases/download/v$VERSION/" \
-  --full-release-notes-url "https://github.com/$REPO/releases/tag/v$VERSION" \
-  --link "https://github.com/$REPO" -o appcast.xml updates
-"../$SPARKLE_BIN/sign_update" --verify appcast.xml
-grep -q "releases/download/v$VERSION/$UPDATE_ZIP" appcast.xml || { echo "appcast.xml does not point at $UPDATE_ZIP." >&2; exit 1; }
-rm -rf updates
-
-SHA=$(shasum -a 256 "$ZIP" | cut -d' ' -f1)
-cat > oh-my-android.rb <<EOF
-cask "oh-my-android" do
-  version "$VERSION"
-  sha256 "$SHA"
-
-  url "https://github.com/$REPO/releases/download/v#{version}/$APP-#{version}.zip"
-  name "Oh My Android"
-  desc "Control panel and MCP server for the Android emulator and devices"
-  homepage "https://royan.se/work/oh-my-android/"
-
-  depends_on macos: :tahoe
-
-  auto_updates true
-
-  app "$BUNDLE"
-  binary "#{appdir}/$BUNDLE/Contents/MacOS/ohmyandroid-mcp"
-
-  zap trash: [
-    "~/Library/Caches/se.royan.ohmyandroid",
-    "~/Library/HTTPStorages/se.royan.ohmyandroid",
-    "~/Library/Preferences/se.royan.ohmyandroid.plist",
-  ]
-end
-EOF
-# MCP bundle (.mcpb): the signed, notarized server alone, for Claude Desktop and the MCP Registry.
-# server.json (repo root) points the registry at it; commit it after the release.
-MCPB=oh-my-android-$VERSION.mcpb
-mkdir -p mcpb/server
-cp "$BUNDLE/Contents/MacOS/ohmyandroid-mcp" mcpb/server/
-cp ../mcpb/icon.png mcpb/
-jq --arg v "$VERSION" '.version = $v' ../mcpb/manifest.json > mcpb/manifest.json
-cp mcpb/manifest.json ../mcpb/manifest.json   # keep the repo copy on the released version; commit it with server.json
-(cd mcpb && zip -qrX "../$MCPB" manifest.json icon.png server)
-rm -rf mcpb
-MCPB_SHA=$(shasum -a 256 "$MCPB" | cut -d' ' -f1)
-jq --arg v "$VERSION" --arg url "https://github.com/$REPO/releases/download/v$VERSION/$MCPB" --arg sha "$MCPB_SHA" \
-  '.version = $v | .packages[0].identifier = $url | .packages[0].fileSha256 = $sha' ../server.json > server.json
-cp server.json ../server.json
-
-echo "Ready: dist/$ZIP (sha256 $SHA)"
-echo "Cask:  dist/oh-my-android.rb"
-echo "Feed:  dist/appcast.xml and dist/$UPDATE_ZIP (upload with the zip)"
-echo "MCP:   dist/$MCPB (upload with the zip), then commit server.json and mcpb/manifest.json and run: mcp-publisher publish"
+(cd "$DESTINATION" && /usr/bin/shasum -a 256 "$ZIP" > SHA256SUMS)
+print "Prepared: $DESTINATION/$ZIP"
+if [[ "$MODE" == development ]]; then
+  print "Development artifact: ad-hoc signed, Apple Silicon, not notarized. No Gatekeeper settings were changed."
+elif (( ! NOTARIZE )); then
+  print "Developer ID signed; notarization was explicitly skipped."
+fi
+print "Updates are disabled until this fork configures its own feed and signing key. No upload or publication was performed."

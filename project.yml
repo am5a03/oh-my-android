@@ -66,10 +66,9 @@ targets:
         LSMinimumSystemVersion: "26.0"
         NSHumanReadableCopyright: "© 2026 Royan AB. MIT License."
         NSHighResolutionCapable: true
-        # Sparkle: the feed is an asset of the latest GitHub release; updates must carry this EdDSA key's signature.
-        SUFeedURL: https://github.com/ateymoori/oh-my-android/releases/latest/download/appcast.xml
-        SUPublicEDKey: YdWTclvQkY33zzPWcTTdG/2ehEminXDGmLn8ruNslis=
-        SUEnableAutomaticChecks: true
+        # A fork must configure its own feed and signing key before enabling updates.
+        CaptureDistributionUpdatesEnabled: false
+        SUEnableAutomaticChecks: false
         SUScheduledCheckInterval: 86400
         SUAutomaticallyUpdate: false
         SUVerifyUpdateBeforeExtraction: true

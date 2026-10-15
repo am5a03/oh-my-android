@@ -212,3 +212,24 @@ bypasses the proxy. These native checkpoint observations cover Android emulator
 and iOS Simulator only; they make no physical iPhone claim. Dependency bundling,
 distribution signing/notarization and broader device/SDK coverage remain release
 work. See [native runtime architecture and recovery](CAPTURE-NATIVE-RUNTIME.md).
+
+## Self-contained development checkpoint
+
+An optimized arm64 development app was packaged with pinned mitmproxy 12.2.3
+(embedded Python 3.14.4) and ADB 37.0.1. Strict nested/outer signature verification,
+the ZIP checksum/integrity check, the MCP protocol check and dependency version
+probes passed. Upstream update-feed/key fields are absent and update checks are
+disabled. The development ZIP is approximately 64 MB.
+
+A fresh Android proof then ran the packaged host with `PATH=/usr/bin:/bin` and
+no tool/resource overrides. Both collector executable paths were verified inside
+the app bundle. It captured HTTP 200, the complete 68-byte request and 960-byte
+response, a native marker and device logs. Device hash, native/HAR equality,
+timeline references and ZIP checksums passed across 124 events. This capture
+was complete; Android runtime proxy-cache clear was acknowledged and routing
+was restored. The existing capture CA was reused.
+
+This establishes the bundled runtime path on this development Mac. A clean PATH
+does not substitute for testing a fresh Mac. Developer ID signing, Apple
+notarization/stapling and Intel support remain unverified. The prepared artifact
+is ad-hoc signed for development, and no Gatekeeper setting was changed.

@@ -15,8 +15,11 @@ final class UpdateController: NSObject {
 
     override init() {
         super.init()
+        guard Bundle.main.object(forInfoDictionaryKey: "CaptureDistributionUpdatesEnabled") as? Bool == true else { return }
         controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: self)
     }
+
+    var isAvailable: Bool { controller != nil }
 
     var automaticallyChecks: Bool {
         get { controller?.updater.automaticallyChecksForUpdates ?? false }

@@ -66,6 +66,25 @@ struct NativeCaptureServicesTests {
         #expect(result.warnings.isEmpty)
     }
 
+    @Test func bundledToolsWorkWithoutDeveloperPathsAndOverridesRemainExplicit() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let app = fixture.root.appendingPathComponent("Capture.app")
+        let paths = ["adb": "Contents/MacOS/capture-adb",
+                     "mitmdump": "Contents/Frameworks/CaptureDependencies/mitmproxy.app/Contents/MacOS/mitmdump"]
+        for relative in paths.values {
+            let url = app.appendingPathComponent(relative)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("test fixture; never executed".utf8).write(to: url)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+        }
+        let discovery = NativeCaptureDiscovery(environment: ["PATH": "/usr/bin:/bin"], applicationBundle: app)
+        for (name, relative) in paths {
+            #expect(try discovery.resolve(nil, name: name, candidates: []) == app.appendingPathComponent(relative))
+            #expect(try discovery.resolve("/usr/bin/true", name: name, candidates: [])?.path == "/usr/bin/true")
+        }
+    }
+
     @Test func exporterPreservesBytesSchemaChecksumsAndSecretsPolicy() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }

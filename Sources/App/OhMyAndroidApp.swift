@@ -55,6 +55,7 @@ private struct MenuBarContent: View {
         }
         Divider()
         Button("Check for Updates…") { delegate.updates.checkForUpdates() }
+            .disabled(!delegate.updates.isAvailable)
         Button("Settings…") { showSettings(tab: "general") }
             .keyboardShortcut(",")
         Button("Quit Oh My Android") { NSApplication.shared.terminate(nil) }

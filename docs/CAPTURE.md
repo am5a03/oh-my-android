@@ -11,17 +11,20 @@ shared timeline linking log messages and network events to original evidence.
 This implementation has no company repositories, accounts, endpoint lists, app
 identifiers or analyzers as dependencies. Physical iPhone is a later phase.
 
-## Prototype prerequisites
+## Source build prerequisites
 
 - macOS 26 and the existing application's build dependencies.
-- Python 3; use a modern Python such as 3.12 for the runtime.
 - Android SDK platform-tools for Android, or full Xcode with a booted iOS Simulator.
 - An installed `mitmdump` executable for network capture. Select an absolute path
   in the capture window's runtime settings when automatic discovery cannot find it.
 
-Python, mitmproxy and the Swift proxy helper are developer prerequisites in this
-prototype. A redistributable installer with bundled runtimes remains follow-up
-work. The Python runtime is copied into the app's resources during the build.
+Source builds can use installed platform-tools and mitmproxy. Prepared Apple
+Silicon builds bundle both tools, including the network engine’s own Python
+interpreter; recipients do not install Python or Homebrew. Capture orchestration,
+discovery, indexing, markers, recovery and export use compiled Swift. The macOS
+proxy helper is compiled and embedded too. See
+[distribution instructions](CAPTURE-DISTRIBUTION.md) for the pinned cache,
+development ZIP and Developer ID/notarization workflow.
 
 If macOS displays **“mitmproxy” Not Opened**, the installed collector is blocked
 by macOS security. If you trust its installation source, dismiss with **Done**,

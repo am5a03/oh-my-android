@@ -36,6 +36,8 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>CaptureDistributionUpdatesEnabled</key>
+	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
 	<key>LSMinimumSystemVersion</key>
@@ -47,11 +49,7 @@
 	<key>SUAutomaticallyUpdate</key>
 	<false/>
 	<key>SUEnableAutomaticChecks</key>
-	<true/>
-	<key>SUFeedURL</key>
-	<string>https://github.com/ateymoori/oh-my-android/releases/latest/download/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>YdWTclvQkY33zzPWcTTdG/2ehEminXDGmLn8ruNslis=</string>
+	<false/>
 	<key>SURequireSignedFeed</key>
 	<true/>
 	<key>SUScheduledCheckInterval</key>

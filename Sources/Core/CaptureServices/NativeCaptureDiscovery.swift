@@ -56,6 +56,7 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
     var runner: any ShellRunning = ProcessShellRunner(timeout: .seconds(20))
     var environment: [String: String] = ProcessInfo.processInfo.environment
     var homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    var applicationBundle: URL? = Self.runningApplicationBundle
 
     func discover(configuration: CaptureToolConfiguration = .init()) async throws -> NativeCaptureDiscoveryResult {
         let adb = try resolve(configuration.adbPath, name: "adb", candidates: [
@@ -110,9 +111,32 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
             }
             return URL(fileURLWithPath: explicit)
         }
-        let search = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+        let bundled = bundledExecutable(name).map { [$0.path] } ?? []
+        let environmentPaths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
             .filter { $0.hasPrefix("/") }.map { $0 + "/" + name } + candidates
+        let search = bundled + environmentPaths
         return search.first(where: Self.isExecutable).map { URL(fileURLWithPath: $0) }
+    }
+
+    func bundledExecutable(_ name: String) -> URL? {
+        guard let applicationBundle else { return nil }
+        let relative: String
+        switch name {
+        case "adb": relative = "Contents/MacOS/capture-adb"
+        case "mitmdump": relative = "Contents/Frameworks/CaptureDependencies/mitmproxy.app/Contents/MacOS/mitmdump"
+        default: return nil
+        }
+        let candidate = applicationBundle.appendingPathComponent(relative)
+        return Self.isExecutable(candidate.path) ? candidate : nil
+    }
+
+    private static var runningApplicationBundle: URL? {
+        if Bundle.main.bundleURL.pathExtension == "app" { return Bundle.main.bundleURL }
+        // A compiled helper runs from the same app's Contents/MacOS directory.
+        guard let executable = Bundle.main.executableURL else { return nil }
+        let macOS = executable.deletingLastPathComponent(), contents = macOS.deletingLastPathComponent()
+        let app = contents.deletingLastPathComponent()
+        return macOS.lastPathComponent == "MacOS" && contents.lastPathComponent == "Contents" && app.pathExtension == "app" ? app : nil
     }
 
     static func parseAndroidDevices(_ output: String) -> [NativeCaptureDevice] {

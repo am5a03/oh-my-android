@@ -114,11 +114,13 @@ private struct UpdateSettingsSection: View {
             LabeledContent("Version \(version)") {
                 Button(updates.pendingVersion.map { "Update to \($0)…" } ?? "Check Now") { updates.checkForUpdates() }
             }
+            if !updates.isAvailable { Text("Automatic updates are disabled for this capture prototype.").foregroundStyle(.secondary) }
         } header: {
             Text("Updates")
         } footer: {
-            Text("Once a day, one small request to GitHub. Updates are signed and notarized, and install only when you choose.")
+            Text(updates.isAvailable ? "Once a day, one small request to GitHub. Updates are signed and notarized, and install only when you choose." : "Install prototype builds from the project’s release instructions. This build does not use the original project’s update feed.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+        .disabled(!updates.isAvailable)
     }
 }
