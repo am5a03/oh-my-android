@@ -425,6 +425,8 @@ actor NativeTimelineStore {
                   url.path == "/mobile-capture-check/\(nonce)/https",
                   let body = event.detail.value(for: "response_body"),
                   body.value(for: "unavailable")?.boolValue != true,
+                  body.value(for: "truncated")?.boolValue != true,
+                  body.value(for: "reason") == nil,
                   body.value(for: "encoding")?.stringValue == "utf-8",
                   let text = body.value(for: "text")?.stringValue,
                   body.value(for: "bytes")?.numberValue == Double(text.utf8.count),

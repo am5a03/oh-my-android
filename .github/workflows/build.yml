@@ -29,6 +29,15 @@ jobs:
           bash Scripts/test-capture-companion-launcher.sh
       - name: Test selected-app quick actions
         run: bash Scripts/test-quick-actions.sh
+      - name: Test guided capture setup and evidence handoff
+        if: matrix.product == 'capture'
+        run: |
+          bash Scripts/test-capture-plan.sh
+          bash Scripts/test-capture-setup-readiness.sh
+          bash Scripts/test-capture-setup-store.sh
+          bash Scripts/test-native-capture-services.sh
+          bash Scripts/test-native-timeline.sh
+          python3 -m unittest discover -s Tests/Capture -p test_setup_probe.py -v
       - name: Test iOS Simulator quick actions
         run: bash Scripts/test-simulator.sh
       - name: Install XcodeGen

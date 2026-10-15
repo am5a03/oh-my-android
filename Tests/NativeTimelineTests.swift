@@ -12,13 +12,17 @@ struct NativeTimelineTests {
         try fixture.state(phase: "recording")
         let nonce = String(repeating: "a", count: 32)
         let body = String(data: try JSONSerialization.data(withJSONObject: ["nonce": nonce, "capture_check": "browser_https"]), encoding: .utf8)!
-        func event(_ scheme: String, body text: String, probe: Bool = true) -> [String: Any] {
-            ["timestamp": "2026-10-15T03:45:00Z", "kind": "response", "detail": [
+        func event(_ scheme: String, body text: String, probe: Bool = true, bodyFields: [String: Any] = [:]) -> [String: Any] {
+            var body: [String: Any] = ["encoding": "utf-8", "text": text, "bytes": text.utf8.count]
+            body.merge(bodyFields, uniquingKeysWith: { _, new in new })
+            return ["timestamp": "2026-10-15T03:45:00Z", "kind": "response", "detail": [
                 "url": "\(scheme)://mitm.it/mobile-capture-check/\(nonce)/https", "status": 200,
                 "setup_probe": probe, "setup_probe_nonce": nonce,
-                "response_body": ["encoding": "utf-8", "text": text, "bytes": text.utf8.count]]]
+                "response_body": body]]
         }
-        try fixture.writeJSONLines("network/events.jsonl", [event("http", body: body), event("https", body: "{}"), event("https", body: body, probe: false)])
+        try fixture.writeJSONLines("network/events.jsonl", [event("http", body: body), event("https", body: "{}"),
+            event("https", body: body, probe: false), event("https", body: body, bodyFields: ["truncated": true]),
+            event("https", body: body, bodyFields: ["reason": "partial body"])])
         let store = try NativeTimelineStore(sessionDirectory: fixture.root)
         _ = try await store.refresh()
         #expect(try await store.setupProbeEvent(nonce: nonce) == nil)
@@ -26,7 +30,7 @@ struct NativeTimelineTests {
         _ = try await store.refresh()
         let proof = try #require(try await store.setupProbeEvent(nonce: nonce))
         #expect(proof.kind == "response")
-        #expect(proof.rawRef == "network/events.jsonl#L4")
+        #expect(proof.rawRef == "network/events.jsonl#L6")
         #expect(try await store.setupProbeEvent(nonce: String(repeating: "b", count: 32)) == nil)
         #expect(try await store.setupProbeEvent(nonce: "../invalid") == nil)
     }
