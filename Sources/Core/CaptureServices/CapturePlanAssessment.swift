@@ -28,7 +28,8 @@ nonisolated struct CapturePlanEvidence: Sendable {
         guard !isSetupProbe, requestBodyAvailable, responseBodyAvailable,
               let statusCode, (200...599).contains(statusCode),
               let components = URLComponents(string: url), components.scheme?.lowercased() == "https",
-              let host = components.host?.lowercased(), !host.isEmpty else { return }
+              let host = components.host?.lowercased(), !host.isEmpty,
+              !(host == "mitm.it" && components.path.hasPrefix("/mobile-capture-check/")) else { return }
         decodedHTTPSExchanges += 1
         if plan.evidenceHints.requestHosts.contains(host) { observedRequestHosts.insert(host) }
     }
