@@ -122,7 +122,8 @@ was exercised through the same runtime's
 CLI; automated Swift protocol checks covered the UI/runtime boundary.
 
 The integrated macOS Debug build passes Swift 6 strict concurrency with compiler
-warnings treated as errors. The capture suite passes **48 tests**, including
+warnings treated as errors. The capture suite passes **52 Python tests** and the
+Swift timeline store checks, including
 ownership conflicts, process failure, recovery, archive retry, timestamp parsing,
 symlink exclusion and real local-proxy body preservation. The existing Android
 quick-actions and Simulator suites also pass, with 25 and 37 checks respectively.
@@ -132,9 +133,11 @@ quick-actions and Simulator suites also pass, with 25 and 37 checks respectively
 1. Bundle and sign the runtime dependencies and an authorized network helper.
    The prototype currently requires Python, mitmdump and Xcode developer tools.
    Test first-run setup and authorization on a fresh Mac.
-2. Add archived-timeline paging/search and capture-size controls. The current UI
-   displays the newest 400 events and filters that window; the ZIP retains the
-   full timeline and raw evidence. Large buffered bodies/logs can consume memory
+2. Add capture-size controls and incremental timeline indexing. Source/text filters
+   now search the full session before loading the newest 400 matches. Displayed
+   history remains while recording, and Load older expands it by 400 matches.
+   The ZIP retains the full timeline and raw evidence. Refreshes still parse the
+   full session, and loaded history, buffered bodies and logs can consume memory
    and disk. App-scoped logs reduce noise but do not solve all volume cases.
 3. Broaden Android device coverage and verify individual ad SDKs' proxy/trust
    behavior. One physical-device app run does not establish every SDK's behavior.

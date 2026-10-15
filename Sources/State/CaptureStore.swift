@@ -135,9 +135,18 @@ private struct CaptureDiscovery: Decodable, Sendable {
     let networkServices: [String]
 }
 
+struct CaptureTimeline: Decodable, Sendable {
+    let source: String
+    let search: String
+    let totalCount: Int
+    let matchingCount: Int
+    let hasOlder: Bool
+}
+
 private struct CaptureUpdate: Decodable, Sendable {
     let session: CaptureSession
     let events: [CaptureEvent]
+    var timeline: CaptureTimeline? = nil
 }
 
 /// A failed operation can still own a session that needs Stop to restore routing.
@@ -145,6 +154,7 @@ private struct CaptureRuntimeFailure: Decodable, LocalizedError, Sendable {
     let error: String
     let session: CaptureSession?
     let events: [CaptureEvent]?
+    let timeline: CaptureTimeline?
     var errorDescription: String? { error }
 }
 
@@ -218,6 +228,8 @@ final class CaptureStore {
     private(set) var networkServices: [String] = []
     private(set) var session: CaptureSession?
     private(set) var events: [CaptureEvent] = []
+    private(set) var timeline: CaptureTimeline?
+    private(set) var isLoadingTimeline = false
     private(set) var isBusy = false
     private(set) var isStarting = false
     private(set) var didDiscover = false
@@ -231,13 +243,14 @@ final class CaptureStore {
     var pythonPath = ""
     var adbPath = ""
     var mitmdumpPath = ""
-    var search = ""
-    var sourceFilter = "all"
+    var search = "" { didSet { if search != oldValue { scheduleTimelineRefresh() } } }
+    var sourceFilter = "all" { didSet { if sourceFilter != oldValue { scheduleTimelineRefresh() } } }
     var newestFirst = false
     var selectedEventID: String?
     var markerText = ""
     private(set) var outputRoot: URL
     @ObservationIgnored private var pollingTask: Task<Void, Never>?
+    @ObservationIgnored private var timelineTask: Task<Void, Never>?
 
     init() {
         outputRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -252,8 +265,14 @@ final class CaptureStore {
             && !(captureNetwork && selectedDevice?.platform == "simulator" && networkService.isEmpty)
     }
     var visibleEvents: [CaptureEvent] {
-        events.filter { (sourceFilter == "all" || $0.source == sourceFilter) && (search.isEmpty || $0.searchText.localizedCaseInsensitiveContains(search)) }
-            .sorted { newestFirst ? $0.timestamp > $1.timestamp : $0.timestamp < $1.timestamp }
+        guard timelineMatchesFilters else { return [] }
+        return newestFirst ? Array(events.reversed()) : events
+    }
+    var timelineMatchesFilters: Bool { timeline?.source == sourceFilter && timeline?.search == search }
+    var hasOlderEvents: Bool { timelineMatchesFilters && timeline?.hasOlder == true }
+    var timelineCountText: String {
+        guard timelineMatchesFilters, let timeline else { return session == nil ? "0 events" : "Loading matching events…" }
+        return "\(events.count) of \(timeline.matchingCount) matching · \(timeline.totalCount) captured"
     }
     var activeTargetName: String {
         if isStarting { return selectedDevice?.name ?? "Preparing selected device" }
@@ -307,8 +326,7 @@ final class CaptureStore {
         defer { isBusy = false }
         do {
             let update: CaptureUpdate = try await client.call(["status", "--session", directory.path], timeout: .seconds(15))
-            search = ""
-            sourceFilter = "all"
+            resetTimeline()
             selectedEventID = nil
             selectedDeviceID = update.session.platform + ":" + update.session.deviceId
             accept(update)
@@ -321,9 +339,8 @@ final class CaptureStore {
 
     func start() async {
         guard canStart, let device = selectedDevice else { return }
-        search = ""
-        sourceFilter = "all"
         isBusy = true
+        resetTimeline()
         isStarting = true
         error = nil
         defer { isBusy = false; isStarting = false }
@@ -354,7 +371,7 @@ final class CaptureStore {
         isBusy = true
         error = nil
         do {
-            let update: CaptureUpdate = try await client.call(["stop", "--session", session.directory], timeout: .seconds(120))
+            let update: CaptureUpdate = try await client.call(["stop", "--session", session.directory] + timelineArguments(), timeout: .seconds(120))
             accept(update)
         } catch { recordFailure(error) }
         isBusy = false
@@ -366,7 +383,7 @@ final class CaptureStore {
         isBusy = true
         defer { isBusy = false }
         do {
-            let update: CaptureUpdate = try await client.call(["marker", "--session", directory, "--text", text])
+            let update: CaptureUpdate = try await client.call(["marker", "--session", directory, "--text", text] + timelineArguments())
             accept(update)
             markerText = ""
         } catch { recordFailure(error) }
@@ -434,13 +451,17 @@ final class CaptureStore {
 
     private func accept(_ update: CaptureUpdate) {
         session = update.session
-        events = update.events
+        // Ignore an older in-flight query after the user changes filters.
+        if let page = update.timeline, page.source == sourceFilter, page.search == search {
+            events = update.events
+            timeline = page
+        }
         if !update.session.isActive { pollingTask?.cancel(); pollingTask = nil }
     }
 
     private func recordFailure(_ error: any Error) {
         if let failure = error as? CaptureRuntimeFailure, let failedSession = failure.session {
-            accept(CaptureUpdate(session: failedSession, events: failure.events ?? []))
+            accept(CaptureUpdate(session: failedSession, events: failure.events ?? [], timeline: failure.timeline))
         }
         self.error = error.localizedDescription
         if let directory = session?.directory { self.error? += "\nSession folder: \(directory)" }
@@ -453,19 +474,60 @@ final class CaptureStore {
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }
                 guard let self, self.session?.isActive == true else { return }
-                await self.poll()
+                await self.refreshTimeline()
             }
         }
     }
 
-    private func poll() async {
-        guard !isBusy, session?.isActive == true, let directory = session?.directory else { return }
+    private func resetTimeline() {
+        search = ""
+        sourceFilter = "all"
+        timelineTask?.cancel()
+        timelineTask = nil
+        isLoadingTimeline = false
+        timeline = nil
+        events = []
+        selectedEventID = nil
+    }
+
+    private func timelineArguments(older: Int = 0) -> [String] {
+        var arguments = ["--source", sourceFilter, "--search=\(search)"]
+        if timelineMatchesFilters, let first = events.first {
+            arguments += ["--retain-from", first.id]
+            if older > 0 { arguments += ["--older-count", String(older)] }
+        }
+        return arguments
+    }
+
+    private func scheduleTimelineRefresh() {
+        timelineTask?.cancel()
+        guard let directory = session?.directory else { return }
+        isLoadingTimeline = true
+        timelineTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            guard let self else { return }
+            while self.isBusy {
+                do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
+            }
+            guard !Task.isCancelled, self.session?.directory == directory else { return }
+            await self.refreshTimeline()
+            if !Task.isCancelled { self.isLoadingTimeline = false }
+        }
+    }
+
+    func loadOlderEvents() async {
+        guard hasOlderEvents else { return }
+        await refreshTimeline(older: 400)
+    }
+
+    private func refreshTimeline(older: Int = 0) async {
+        guard !isBusy, let directory = session?.directory else { return }
         isBusy = true
         defer { isBusy = false }
         do {
-            let update: CaptureUpdate = try await client.call(["status", "--session", directory], timeout: .seconds(15))
+            let update: CaptureUpdate = try await client.call(["status", "--session", directory] + timelineArguments(older: older), timeout: .seconds(15))
             accept(update)
             error = nil
-        } catch { self.error = "Capture status unavailable: \(error.localizedDescription) Use Stop to finalize and restore routing.\nSession folder: \(directory)" }
+        } catch { self.error = "Timeline/status unavailable: \(error.localizedDescription)\nSession folder: \(directory)" }
     }
 }

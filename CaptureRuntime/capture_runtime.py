@@ -134,11 +134,12 @@ def evidence_module():
     return evidence
 
 
-def response(session_dir, *, cap=400):
+def response(session_dir, *, cap=400, source="all", search="", retain_from=None, older=0):
     state = read_json(Path(session_dir) / "session.json")
     if not state:
         raise CaptureError("Session not found. Select its capture directory.")
-    events = evidence_module().read_events(Path(session_dir), limit=cap)
+    page = evidence_module().read_event_page(Path(session_dir), limit=cap, source=source,
+                                             search=search, retain_from=retain_from, older=older)
     state["counts"] = {source: 0 for source in ("logs", "network", "markers")}
     diagnostics = {"decoded_http_events": 0, "tls_errors": 0, "certificate_rejections": 0, "request_errors": 0}
     # Counts are raw source counts, including request/response events separately.
@@ -185,7 +186,7 @@ def response(session_dir, *, cap=400):
             warning = (f"{diagnostics['tls_errors']} TLS handshakes failed. Check capture CA trust, certificate pinning and the TLS error details.")
         if warning not in state["warnings"]:
             state["warnings"].append(warning)
-    return {"session": state, "events": events}
+    return {"session": state, **page}
 
 
 def acquire_routing_lock(session_dir):
@@ -545,7 +546,7 @@ def simulator_log_command(request, tools, state):
     target = str(request.get("target_app") or "").strip()
     if not target:
         scope = {"mode": "all_simulator_processes", "predicate": None}
-        state["warnings"].append("Simulator logs include all processes at debug level. High volume can hide relevant events in the live 400-event window; enter a target app bundle identifier for process-scoped logs.")
+        state["warnings"].append("Simulator logs include all processes at debug level. High volume can consume memory and disk; enter a target app bundle identifier for process-scoped logs, or use the timeline filters to inspect the full session.")
     else:
         apps = simulator_apps(run([tools["simctl"], "listapps", request["device_id"]]).stdout)
         app = apps.get(target)
@@ -819,7 +820,7 @@ def session_path(value):
     return path
 
 
-def start(request_path):
+def start(request_path, **view):
     request = read_json(request_path)
     if not isinstance(request, dict):
         raise CaptureError("Start request must be a JSON object.")
@@ -859,37 +860,37 @@ def start(request_path):
     while time.monotonic() < deadline:
         state = read_json(directory / "session.json")
         if state["phase"] in ("recording", "saved", "partial", "failed"):
-            return response(directory)
+            return response(directory, **view)
         if supervisor.poll() is not None:
-            result = stop(directory)
+            result = stop(directory, **view)
             result["error"] = "Capture supervisor exited during startup. Inspect runtime/supervisor.stderr for tool diagnostics."
             return result
         time.sleep(0.1)
     control_request(directory, "stop")
-    result = response(directory)
+    result = response(directory, **view)
     result["error"] = f"Capture startup timed out. Stop/recover this session: {directory}"
     return result
 
 
-def status(directory):
+def status(directory, **view):
     state = read_json(directory / "session.json")
     if state["phase"] in ACTIVE_PHASES and not control_request(directory, "ping"):
-        result = response(directory)
+        result = response(directory, **view)
         if result["session"]["phase"] in ACTIVE_PHASES:
             result["session"]["warnings"] = list(dict.fromkeys(result["session"]["warnings"] + ["Capture supervisor has not answered. Preparation/shutdown may be in progress; use Stop for safe recovery."]))
             result["session"]["supervisor_available"] = False
         return result
-    return response(directory)
+    return response(directory, **view)
 
 
-def stop(directory):
+def stop(directory, **view):
     state = read_json(directory / "session.json")
     if state["phase"] in ACTIVE_PHASES and control_request(directory, "stop"):
         deadline = time.monotonic() + 65
         while time.monotonic() < deadline:
             state = read_json(directory / "session.json")
             if state["phase"] not in ACTIVE_PHASES:
-                return response(directory)
+                return response(directory, **view)
             time.sleep(0.1)
         raise CaptureError(f"Collectors are still stopping. Retry Stop for recovery: {directory}")
     if state["phase"] in ACTIVE_PHASES or state.get("routing_restored") is False or not state.get("package_path"):
@@ -898,7 +899,7 @@ def stop(directory):
         try:
             ownership = acquire_routing_lock(directory)
         except CaptureError:
-            result = response(directory)
+            result = response(directory, **view)
             result["session"]["warnings"].append("The supervisor still owns capture routing. Preparation or shutdown may be waiting for macOS authorization; wait and retry Stop. Recovery has not changed its settings.")
             return result
         try:
@@ -908,7 +909,7 @@ def stop(directory):
                 time.sleep(0.1)
             missing = [config.stem for config in configs if not config.with_suffix(".result.json").exists()]
             if missing:
-                result = response(directory)
+                result = response(directory, **view)
                 result["session"]["warnings"].append("Worker shutdown receipts are unavailable; recovery/export is deferred to preserve evidence: " + ", ".join(missing))
                 return result
             state = read_json(directory / "session.json")
@@ -918,7 +919,7 @@ def stop(directory):
             finalize(directory, state, interrupted=active_orphan)
         finally:
             ownership.close()
-    return response(directory)
+    return response(directory, **view)
 
 
 def main(argv=None):
@@ -929,11 +930,25 @@ def main(argv=None):
     discover.add_argument("--mitmdump-path")
     begin = sub.add_parser("start")
     begin.add_argument("--request", required=True)
+    public_commands = [begin]
     for action in ("status", "marker", "stop", "_supervise"):
         command = sub.add_parser(action)
         command.add_argument("--session", required=True)
         if action == "marker":
             command.add_argument("--text", required=True)
+        if action != "_supervise":
+            public_commands.append(command)
+    def nonnegative(value):
+        number = int(value)
+        if number < 0:
+            raise argparse.ArgumentTypeError("must be nonnegative")
+        return number
+    for command in public_commands:
+        command.add_argument("--source", choices=("all", "logs", "network", "marker"), default="all")
+        command.add_argument("--search", default="")
+        command.add_argument("--event-limit", type=nonnegative, default=400)
+        command.add_argument("--retain-from")
+        command.add_argument("--older-count", type=nonnegative, default=0)
     worker_parser = sub.add_parser("_worker")
     worker_parser.add_argument("--config", required=True)
     args = parser.parse_args(argv)
@@ -941,21 +956,24 @@ def main(argv=None):
         return worker(args.config)
     if args.action == "_supervise":
         return supervise(Path(args.session))
+    view = ({"cap": args.event_limit, "source": args.source, "search": args.search,
+             "retain_from": args.retain_from, "older": args.older_count}
+            if args.action != "devices" else {})
     try:
         if args.action == "devices":
             tools = tools_for({"adb_path": args.adb_path, "mitmdump_path": args.mitmdump_path})
             result = {"devices": list_devices(tools), "tools": tools, "network_services": network_services()}
         elif args.action == "start":
-            result = start(args.request)
+            result = start(args.request, **view)
         else:
             directory = session_path(args.session)
             if args.action == "marker":
                 if read_json(directory / "session.json")["phase"] != "recording":
                     raise CaptureError("Markers can be added only while a session is recording.")
                 evidence_module().append_marker(directory, args.text)
-                result = response(directory)
+                result = response(directory, **view)
             else:
-                result = status(directory) if args.action == "status" else stop(directory)
+                result = status(directory, **view) if args.action == "status" else stop(directory, **view)
         if result.get("session", {}).get("phase") == "failed" and not result.get("error"):
             result["error"] = "; ".join(result["session"].get("warnings", [])) or "Capture failed; inspect the recoverable session."
         print(json.dumps(result, ensure_ascii=False))

@@ -18,6 +18,7 @@ from pathlib import Path, PurePosixPath
 import re
 import stat
 import tempfile
+import unicodedata
 import uuid
 import zipfile
 
@@ -276,6 +277,37 @@ def read_events(session_dir: Path, limit: int | None = None) -> list[dict]:
     root = _root(session_dir)
     events = _read_events(root, _state(root))
     return events if limit is None else events[-limit:] if limit else []
+
+
+def read_event_page(session_dir: Path, *, limit: int = 400, source: str = "all",
+                    search: str = "", retain_from: str | None = None, older: int = 0) -> dict:
+    """Filter the full session before paging; retain displayed history on refresh.
+
+    The oldest displayed event is an anchor, not an offset: incoming device logs
+    or network events cannot evict rows already being inspected. Loading older
+    expands that same window. This is a view only; raw evidence is never changed.
+    """
+    for value in (limit, older):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError("limit and older must be nonnegative integers")
+    if source not in ("all", "logs", "network", "marker"):
+        raise ValueError("Unknown timeline source")
+    events = read_events(session_dir)
+    # macOS process arguments may use decomposed Unicode while JSON bodies use
+    # composed Unicode. Match canonically equivalent text in either form.
+    def folded(value):
+        return unicodedata.normalize("NFC", value).casefold()
+    query = folded(search)
+    matches = [event for event in events if (source == "all" or event["source"] == source)
+               and (not query or query in folded(event["summary"] + " " + event["kind"] + " "
+                    + event["raw_ref"] + " " + json.dumps(event["detail"], ensure_ascii=False, sort_keys=True)))]
+    start = max(0, len(matches) - limit)
+    if retain_from is not None:
+        anchor = next((index for index, event in enumerate(matches) if event["id"] == retain_from), None)
+        if anchor is not None:
+            start = max(0, min(start, anchor - older))
+    return {"events": matches[start:], "timeline": {"source": source, "search": search,
+            "total_count": len(events), "matching_count": len(matches), "has_older": start > 0}}
 
 
 def append_marker(session_dir: Path, text: str) -> dict:

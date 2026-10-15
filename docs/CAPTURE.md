@@ -67,7 +67,14 @@ it across restarts. Separate helper and extension processes are outside that
 scope. Leaving the field empty captures all Simulator processes at debug level
 and can produce substantial volume. The exported context records the exact scope.
 On Android, the field records investigation context and raw logs retain all
-processes. Use the timeline's text/source filters for inspection. Network traffic
+processes. Use the timeline's text/source filters for inspection. Filters search
+the full session, including request/response details and bodies, and initially
+load the newest 400 matches. Displayed history stays visible as new events arrive;
+use **Load 400 older matches** to expand it. The count shows displayed matches,
+total matches and total captured events. Requests and responses are separate
+events, so event counts are not a count of HTTP transactions. There is no automatic
+event-count retention limit on the raw session or ZIP; available disk space limits
+capture size. Network traffic
 is not automatically attributed to one app. An app that emits no useful diagnostic
 messages cannot be made verbose by this tool.
 

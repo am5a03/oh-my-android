@@ -160,6 +160,59 @@ class EvidenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             evidence.append_marker(self.root, "  ")
 
+    def test_network_filter_searches_full_session_despite_device_log_flood(self):
+        self.state()
+        self.write("network/events.jsonl", self.line(detail={"response_body": {"text": "OLDER CAFÉ evidence"}}) + "\n")
+        self.write("logs/device.log", "".join(f"1792022402.000  1  2 I Noise: line {i}\n" for i in range(900)))
+        self.assertTrue(all(event["source"] == "logs" for event in evidence.read_events(self.root, 400)))
+        page = evidence.read_event_page(self.root, source="network", search="café")
+        self.assertEqual(len(page["events"]), 1)
+        self.assertEqual(page["timeline"], {"source": "network", "search": "café", "total_count": 901,
+                                            "matching_count": 1, "has_older": False})
+        self.assertEqual(page["events"][0]["detail"]["response_body"]["text"], "OLDER CAFÉ evidence")
+        self.write("logs/device.log", "".join(f"1792022403.000  1  2 I Noise: line {i}\n" for i in range(1800)))
+        self.assertEqual(evidence.read_event_page(self.root, source="network", search="CAFÉ")["events"], page["events"])
+        self.assertEqual(evidence.read_event_page(self.root, source="network", search="cafe\u0301")["events"], page["events"])
+        empty = evidence.read_event_page(self.root, source="network", search="absent")
+        self.assertEqual(empty["events"], [])
+        self.assertEqual(empty["timeline"]["total_count"], 1801)
+
+    def test_timeline_refresh_retains_history_and_loads_older_during_capture(self):
+        state = self.state(sources={"logs": "not_selected", "network": "observed"})
+        def network_lines(count):
+            return "".join(self.line(id=f"flow-{i}", timestamp=f"2026-10-15T00:{i // 60:02d}:{i % 60:02d}Z",
+                                     summary=f"Request {i}") + "\n" for i in range(count))
+        self.write("network/events.jsonl", network_lines(900))
+        first = evidence.read_event_page(self.root, source="network")
+        self.assertEqual(len(first["events"]), 400)
+        self.assertEqual(first["events"][0]["summary"], "Request 500")
+        self.assertTrue(first["timeline"]["has_older"])
+        anchor = first["events"][0]["id"]
+        self.write("network/events.jsonl", network_lines(1500))
+        refreshed = evidence.read_event_page(self.root, source="network", retain_from=anchor)
+        self.assertEqual(len(refreshed["events"]), 1000)
+        self.assertEqual(refreshed["events"][:400], first["events"])
+        older = evidence.read_event_page(self.root, source="network", retain_from=anchor, older=400)
+        self.assertEqual(older["events"][0]["summary"], "Request 100")
+        all_events = evidence.read_event_page(self.root, source="network", retain_from=older["events"][0]["id"], older=400)
+        self.assertEqual(len(all_events["events"]), 1500)
+        self.assertFalse(all_events["timeline"]["has_older"])
+        package = evidence.finalize_package(self.root, state)
+        with zipfile.ZipFile(package) as archive:
+            self.assertEqual(len(archive.read("timeline/events.jsonl").splitlines()), 1500)
+
+    def test_timeline_page_validates_options_and_keeps_source_order_on_timestamp_ties(self):
+        self.state()
+        self.write("network/events.jsonl", self.line() + "\n")
+        self.write("timeline/markers.jsonl", json.dumps({"timestamp": "2026-10-15T00:00:01.250000Z", "text": "tap"}) + "\n")
+        page = evidence.read_event_page(self.root, retain_from="missing-anchor")
+        self.assertEqual([event["source"] for event in page["events"]], ["network", "marker"])
+        self.assertEqual(evidence.read_event_page(self.root, source="marker")["events"][0]["summary"], "tap")
+        self.assertEqual(evidence.read_event_page(self.root, limit=0)["events"], [])
+        for options in ({"limit": -1}, {"older": -1}, {"limit": True}, {"source": "unknown"}):
+            with self.assertRaises(ValueError):
+                evidence.read_event_page(self.root, **options)
+
     def test_network_bodies_and_native_bytes_are_byte_exact(self):
         state = self.state(sources={"logs": "not_selected", "network": "observed"})
         request = self.line()

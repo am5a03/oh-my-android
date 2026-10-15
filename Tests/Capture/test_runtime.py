@@ -247,6 +247,33 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(result["network_diagnostics"]["certificate_rejections"], 1)
         self.assertEqual(runtime.read_json(session / "session.json")["sources"]["network"], "tls_failed")
 
+    def test_status_cli_filters_full_session_and_retains_rows_across_refresh(self):
+        session = self.root / "timeline-history"
+        (session / "network").mkdir(parents=True)
+        (session / "logs").mkdir()
+        runtime.write_json(session / "session.json", {"id": "history", "started_at": "2026-10-15T00:00:00Z",
+                           "phase": "saved", "sources": {"logs": "observed", "network": "observed"}, "warnings": []})
+        def network_lines(count):
+            return "".join(json.dumps({"kind": "request", "timestamp": f"2026-10-15T00:00:{i:02d}Z",
+                                       "summary": f"GET https://example.invalid/ad/{i}"}) + "\n" for i in range(count))
+        network = session / "network/events.jsonl"
+        network.write_text(network_lines(5))
+        (session / "logs/device.log").write_text("1792022460.000  1  2 I Noise: later\n" * 600)
+        args = ("status", "--session", str(session), "--source", "network", "--search", "/AD/", "--event-limit", "2")
+        code, first = self.cli(*args)
+        self.assertEqual(code, 0)
+        self.assertEqual([event["summary"].rsplit("/", 1)[1] for event in first["events"]], ["3", "4"])
+        self.assertEqual(first["session"]["counts"], {"logs": 600, "network": 5, "markers": 0})
+        self.assertEqual(first["timeline"]["matching_count"], 5)
+        anchor = first["events"][0]["id"]
+        network.write_text(network_lines(9))
+        _, refreshed = self.cli(*args, "--retain-from", anchor)
+        self.assertEqual(len(refreshed["events"]), 6)
+        _, older = self.cli(*args, "--retain-from", anchor, "--older-count", "3")
+        self.assertEqual(len(older["events"]), 9)
+        self.assertFalse(older["timeline"]["has_older"])
+        self.assertEqual(network.read_text(), network_lines(9))
+
     def test_external_proxy_changes_are_preserved_and_stop_can_retry_recovery(self):
         code, started = self.begin()
         session = Path(started["session"]["directory"])

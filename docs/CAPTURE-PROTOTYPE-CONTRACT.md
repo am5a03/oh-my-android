@@ -71,7 +71,16 @@ processes are excluded. An empty target captures all processes with a volume
 warning. `context.log_scope` records the resolved executable and predicate.
 Android retains broad device logs and treats `target_app` as context.
 
-Start, status, marker and stop return `{"session": SESSION, "events": [EVENT]}`.
+Start, status, marker and stop return
+`{"session": SESSION, "events": [EVENT], "timeline": PAGE}`.
+Optional view arguments on these commands are `--source all|logs|network|marker`,
+`--search TEXT`, `--event-limit N` (default 400), `--retain-from EVENT_ID` and
+`--older-count N`. Source/text filters apply to the full normalized session,
+including event details and bodies, before the display limit. PAGE contains
+`source`, `search`, `total_count`, `matching_count` and `has_older`.
+Passing the oldest displayed event ID retains that row and all subsequent matches
+as capture grows; `--older-count 400` expands the retained window backwards.
+Without an anchor, the latest N matches are returned in stable chronological order.
 SESSION fields:
 
 - `id`, `directory`, `platform`, `device_id`, `device_name`, `started_at`: strings.
@@ -95,6 +104,7 @@ Use stdlib Python and `pathlib.Path` arguments:
 
 ```
 read_events(session_dir: Path, limit: int | None = None) -> list[dict]
+read_event_page(session_dir: Path, *, limit=400, source="all", search="", retain_from=None, older=0) -> dict
 append_marker(session_dir: Path, text: str) -> dict
 finalize_package(session_dir: Path, manifest: dict) -> Path
 ```

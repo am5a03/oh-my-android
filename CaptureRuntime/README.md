@@ -59,8 +59,10 @@ retains all SDK logs emitted by that process across app restarts, while separate
 helper/extension processes remain outside scope. The exact predicate and scope
 are recorded in warnings and `context.log_scope`. An unknown target fails before
 changing routing. Leaving the target empty captures all processes at debug
-level, with a high-volume warning: unrelated logs can crowd the 400-event live
-view even though the exported raw evidence remains complete.
+level, with a high-volume warning. Timeline source/text filters search the full
+session before loading the latest 400 matches. Refreshes retain the oldest
+displayed event so new traffic cannot evict visible history; Load older expands
+that window by 400 matches. The session and exported evidence remain complete.
 Network capture applies HTTP/HTTPS proxies only to an explicitly selected Mac
 network service. Its complete proxy protocol configuration and enabled state
 are snapshotted. PAC/WPAD configurations are refused before mutation. The helper

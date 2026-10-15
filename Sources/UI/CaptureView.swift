@@ -210,6 +210,18 @@ struct CaptureView: View {
                 .labelsHidden().frame(width: 130)
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
+            HStack(spacing: 10) {
+                Text(store.timelineCountText).monospacedDigit()
+                if store.isLoadingTimeline { ProgressView().controlSize(.small) }
+                if store.hasOlderEvents {
+                    Button("Load 400 older matches") { Task { await store.loadOlderEvents() } }
+                        .disabled(store.isBusy || store.isLoadingTimeline)
+                }
+                Spacer()
+                Text("Filters search the full session. Displayed history stays while recording.")
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            .padding(.horizontal, 16).padding(.bottom, 8)
             HSplitView {
                 eventList.frame(minWidth: 460)
                 eventDetail.frame(minWidth: 290, idealWidth: 350)
@@ -230,8 +242,8 @@ struct CaptureView: View {
     @ViewBuilder
     private var eventList: some View {
         if store.visibleEvents.isEmpty {
-            ContentUnavailableView(store.events.isEmpty ? "No evidence yet" : "No matching events", systemImage: "list.bullet.rectangle",
-                description: Text(!store.events.isEmpty ? "Clear the text and source filters to see this session’s events." : (store.hasActiveCapture ? "Use the selected device and add markers while recording. A started collector is not proof of captured traffic." : "Select a device and capture sources, then start a session.")))
+            ContentUnavailableView(store.isLoadingTimeline || !store.timelineMatchesFilters && store.session != nil ? "Loading timeline…" : (store.timeline?.totalCount ?? 0) > 0 ? "No matching events" : "No evidence yet", systemImage: "list.bullet.rectangle",
+                description: Text(!store.search.isEmpty || store.sourceFilter != "all" ? "Filters search all captured events. Clear the filters to see other evidence." : (store.hasActiveCapture ? "Use the selected device and add markers while recording. A started collector is not proof of captured traffic." : "Select a device and capture sources, then start a session.")))
         } else {
             List(selection: $store.selectedEventID) {
                 ForEach(store.visibleEvents) { event in
@@ -300,7 +312,7 @@ struct CaptureView: View {
 
     private var footer: some View {
         HStack(alignment: .top, spacing: 16) {
-            Text("\(store.visibleEvents.count) shown · Time proximity is inferred, not proof of a shared ad request.")
+            Text("All captured evidence is retained in the session and ZIP. Time proximity is inferred.")
             Spacer()
             Text("Saved locally. No automatic uploads. Review private evidence before sharing.")
         }
