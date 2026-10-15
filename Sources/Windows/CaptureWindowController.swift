@@ -12,7 +12,8 @@ final class CaptureWindowController {
 
     func show() {
         CaptureCommandTarget.shared.register(window: tool.window, store: store)
-        tool.present(subtitle: "Android + iOS Simulator · Prototype")
+        // Keep a single-line title so AppKit centers it with the toolbar controls.
+        tool.present(subtitle: "")
         CaptureCommandMenu.shared.install()
         if !store.didDiscover, !store.hasActiveCapture { Task { await store.refreshDevices() } }
     }
