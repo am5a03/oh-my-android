@@ -31,6 +31,8 @@ tunnel/certificate setup and use short recordings for reproductions; an unfilter
 setup run produced 1.8 GB of raw logs in about 15 minutes, with a much larger
 temporary index and a prolonged save. App-scoped capture, explicit recording limits
 and a compact index remain necessary before an AdOps release.
+The [cross-platform logging plan](CAPTURE-LOGGING-PLAN.md) defines those implementation
+checkpoints and proposed defaults for Android, iPhone and Simulator.
 
 For physical iPhone network capture, select the phone and choose **Set Up iPhone
 Capture…**. Keep the phone and Mac on the same reachable Wi-Fi network. Scan the
