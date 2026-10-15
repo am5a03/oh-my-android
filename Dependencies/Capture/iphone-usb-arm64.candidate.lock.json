@@ -1,0 +1,625 @@
+{
+  "architecture": "arm64",
+  "limits": [
+    "Mach-O load-command closure only; OS pairing/trust, iOS compatibility and SSL provider/config behavior require clean-Mac acceptance",
+    "Supplied notices and installed source recipes are inventoried; source availability/relinking obligations require release review",
+    "Version/help probes contact no devices and do not prove USB logging or installed-app access"
+  ],
+  "nodes": [
+    {
+      "architectures": [
+        "arm64"
+      ],
+      "bytes": 52656,
+      "kind": "tool",
+      "load_commands": [
+        "/opt/homebrew/Cellar/libimobiledevice/1.4.0/lib/libimobiledevice-1.0.6.dylib",
+        "/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib",
+        "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib",
+        "/opt/homebrew/opt/libusbmuxd/lib/libusbmuxd-2.0.7.dylib",
+        "/opt/homebrew/opt/libimobiledevice-glue/lib/libimobiledevice-glue-1.0.0.dylib",
+        "/opt/homebrew/opt/libplist/lib/libplist-2.0.4.dylib",
+        "/System/Library/Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "name": "idevice_id",
+      "rpaths": [],
+      "sha256": "c92ca2658642568b49533eee9b88f92ec04812509397b51876446a08a35a5636",
+      "source": "/opt/homebrew/Cellar/libimobiledevice/1.4.0/bin/idevice_id"
+    },
+    {
+      "architectures": [
+        "arm64"
+      ],
+      "bytes": 52832,
+      "kind": "tool",
+      "load_commands": [
+        "/opt/homebrew/Cellar/libimobiledevice/1.4.0/lib/libimobiledevice-1.0.6.dylib",
+        "/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib",
+        "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib",
+        "/opt/homebrew/opt/libusbmuxd/lib/libusbmuxd-2.0.7.dylib",
+        "/opt/homebrew/opt/libimobiledevice-glue/lib/libimobiledevice-glue-1.0.0.dylib",
+        "/opt/homebrew/opt/libplist/lib/libplist-2.0.4.dylib",
+        "/System/Library/Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "name": "ideviceinfo",
+      "rpaths": [],
+      "sha256": "23d4c5c3443e3716291b225e0825924a20df6492b0acfa778b33db660ba7282c",
+      "source": "/opt/homebrew/Cellar/libimobiledevice/1.4.0/bin/ideviceinfo"
+    },
+    {
+      "architectures": [
+        "arm64"
+      ],
+      "bytes": 89776,
+      "kind": "tool",
+      "load_commands": [
+        "/opt/homebrew/Cellar/libimobiledevice/1.4.0/lib/libimobiledevice-1.0.6.dylib",
+        "/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib",
+        "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib",
+        "/opt/homebrew/opt/libusbmuxd/lib/libusbmuxd-2.0.7.dylib",
+        "/opt/homebrew/opt/libimobiledevice-glue/lib/libimobiledevice-glue-1.0.0.dylib",
+        "/opt/homebrew/opt/libplist/lib/libplist-2.0.4.dylib",
+        "/System/Library/Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "name": "idevicesyslog",
+      "rpaths": [],
+      "sha256": "f0b7da44ab40e648466ad7a375387ae5faea6797dac9d004b70051511976cdb3",
+      "source": "/opt/homebrew/Cellar/libimobiledevice/1.4.0/bin/idevicesyslog"
+    },
+    {
+      "architectures": [
+        "arm64"
+      ],
+      "bytes": 93408,
+      "kind": "tool",
+      "load_commands": [
+        "/opt/homebrew/opt/libimobiledevice/lib/libimobiledevice-1.0.6.dylib",
+        "/opt/homebrew/opt/libplist/lib/libplist-2.0.4.dylib",
+        "/opt/homebrew/opt/libzip/lib/libzip.5.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "name": "ideviceinstaller",
+      "rpaths": [],
+      "sha256": "8e5112a3f55f553c72cc1f41e878264acb431ad2b35adf89168e0180b2c98172",
+      "source": "/opt/homebrew/Cellar/ideviceinstaller/1.2.0/bin/ideviceinstaller"
+    },
+    {
+      "architectures": [
+        "arm64"
+      ],
+      "bytes": 4846032,
+      "kind": "library",
+      "load_commands": [
+        "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "name": "libcrypto.3.dylib",
+      "rpaths": [],
+      "sha256": "34bc039f5c725691e757ef42d26f1709830b18046c3ad6d93985153c83d0bbbc",
+      "source": "/opt/homebrew/Cellar/openssl@3/3.6.3/lib/libcrypto.3.dylib"
+    },
+    {
+      "architectures": [
+        "arm64"
+      ],
+      "bytes": 331264,
+      "kind": "library",
+      "load_commands": [
+        "/opt/homebrew/opt/libimobiledevice/lib/libimobiledevice-1.0.6.dylib",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/System/Library/Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration",
+        "/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib",
+        "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib",
+        "/opt/homebrew/opt/libusbmuxd/lib/libusbmuxd-2.0.7.dylib",
+        "/opt/homebrew/opt/libimobiledevice-glue/lib/libimobiledevice-glue-1.0.0.dylib",
+        "/opt/homebrew/opt/libplist/lib/libplist-2.0.4.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "name": "libimobiledevice-1.0.6.dylib",
+      "rpaths": [],
+      "sha256": "344e23da4ed1bd3e8e60838d95585059a573e4ee24fcd5364f8ddbfc428e48da",
+      "source": "/opt/homebrew/Cellar/libimobiledevice/1.4.0/lib/libimobiledevice-1.0.6.dylib"
+    },
+    {
+      "architectures": [
+        "arm64"
+      ],
+      "bytes": 97520,
+      "kind": "library",
+      "load_commands": [
+        "/opt/homebrew/opt/libimobiledevice-glue/lib/libimobiledevice-glue-1.0.0.dylib",
+        "/usr/lib/libSystem.B.dylib",
+        "/opt/homebrew/opt/libplist/lib/libplist-2.0.4.dylib"
+      ],
+      "name": "libimobiledevice-glue-1.0.0.dylib",
+      "rpaths": [],
+      "sha256": "fda1c1db21248558f47d85529d38758f733316230186acc14d897181317acb3f",
+      "source": "/opt/homebrew/Cellar/libimobiledevice-glue/1.3.2/lib/libimobiledevice-glue-1.0.0.dylib"
+    },
+    {
+      "architectures": [
+        "arm64"
+      ],
+      "bytes": 184512,
+      "kind": "library",
+      "load_commands": [
+        "/opt/homebrew/opt/xz/lib/liblzma.5.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "name": "liblzma.5.dylib",
+      "rpaths": [],
+      "sha256": "3d5bfa2f097c31463642b1daab5e662b44368bb4da368f85e412e7f9adcbaa10",
+      "source": "/opt/homebrew/Cellar/xz/5.8.3/lib/liblzma.5.dylib"
+    },
+    {
+      "architectures": [
+        "arm64"
+      ],
+      "bytes": 115200,
+      "kind": "library",
+      "load_commands": [
+        "/opt/homebrew/opt/libplist/lib/libplist-2.0.4.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "name": "libplist-2.0.4.dylib",
+      "rpaths": [],
+      "sha256": "9e833f3fddc6413a7645d5cc42bff19d6e66330386d0b4ab6ffb41b4fd8c5101",
+      "source": "/opt/homebrew/Cellar/libplist/2.7.0/lib/libplist-2.0.4.dylib"
+    },
+    {
+      "architectures": [
+        "arm64"
+      ],
+      "bytes": 884992,
+      "kind": "library",
+      "load_commands": [
+        "/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib",
+        "/opt/homebrew/Cellar/openssl@3/3.6.3/lib/libcrypto.3.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "name": "libssl.3.dylib",
+      "rpaths": [],
+      "sha256": "4c3c554adc8ace6ec2245b4962b181451d245edfab92c3a09fc7b3be094e7438",
+      "source": "/opt/homebrew/Cellar/openssl@3/3.6.3/lib/libssl.3.dylib"
+    },
+    {
+      "architectures": [
+        "arm64"
+      ],
+      "bytes": 90096,
+      "kind": "library",
+      "load_commands": [
+        "/opt/homebrew/opt/libusbmuxd/lib/libusbmuxd-2.0.7.dylib",
+        "/opt/homebrew/opt/libimobiledevice-glue/lib/libimobiledevice-glue-1.0.0.dylib",
+        "/opt/homebrew/opt/libplist/lib/libplist-2.0.4.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "name": "libusbmuxd-2.0.7.dylib",
+      "rpaths": [],
+      "sha256": "d461027af9843c3a58f718b76ea1173f1a16200f1ecc453e6082ff268191d501",
+      "source": "/opt/homebrew/Cellar/libusbmuxd/2.1.1/lib/libusbmuxd-2.0.7.dylib"
+    },
+    {
+      "architectures": [
+        "arm64"
+      ],
+      "bytes": 154560,
+      "kind": "library",
+      "load_commands": [
+        "/opt/homebrew/opt/libzip/lib/libzip.5.dylib",
+        "/usr/lib/libbz2.1.0.dylib",
+        "/opt/homebrew/opt/xz/lib/liblzma.5.dylib",
+        "/opt/homebrew/opt/zstd/lib/libzstd.1.dylib",
+        "/usr/lib/libz.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "name": "libzip.5.5.dylib",
+      "rpaths": [
+        "/opt/homebrew/Cellar/libzip/1.11.4_1/lib"
+      ],
+      "sha256": "080bcf6cd75af7cc4ae4013722c31c54dd4ebb3857c658c1958ce4e39bce84ae",
+      "source": "/opt/homebrew/Cellar/libzip/1.11.4_1/lib/libzip.5.5.dylib"
+    },
+    {
+      "architectures": [
+        "arm64"
+      ],
+      "bytes": 649648,
+      "kind": "library",
+      "load_commands": [
+        "/opt/homebrew/opt/zstd/lib/libzstd.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "name": "libzstd.1.5.7.dylib",
+      "rpaths": [
+        "@loader_path/../lib"
+      ],
+      "sha256": "e2847c4613b386683c234913ae3b7b04299254096caf7616e3b3cd9bb97a39ab",
+      "source": "/opt/homebrew/Cellar/zstd/1.5.7_1/lib/libzstd.1.5.7.dylib"
+    }
+  ],
+  "prefix": "/opt/homebrew",
+  "provenance": [
+    {
+      "built_as_bottle": true,
+      "files": [
+        {
+          "bytes": 909,
+          "name": "ideviceinstaller.rb",
+          "sha256": "11fd18b838d70bb6006b1e4bb99bc2da8a967020aa6648428570ae8d01ed0838",
+          "source": "/opt/homebrew/Cellar/ideviceinstaller/1.2.0/.brew/ideviceinstaller.rb"
+        },
+        {
+          "bytes": 58,
+          "name": "AUTHORS",
+          "sha256": "2a68b2b5ed27b47c101c754b84addbb478afc2e8362e732ab164f7846323b55b",
+          "source": "/opt/homebrew/Cellar/ideviceinstaller/1.2.0/AUTHORS"
+        },
+        {
+          "bytes": 17988,
+          "name": "COPYING",
+          "sha256": "7619c753cac95d4740220223bde48a032606fcaccde5e546f9bc444c81ab356d",
+          "source": "/opt/homebrew/Cellar/ideviceinstaller/1.2.0/COPYING"
+        }
+      ],
+      "formula": "ideviceinstaller",
+      "poured_from_bottle": true,
+      "source_metadata": {
+        "spec": "stable",
+        "tap": "homebrew/core",
+        "tap_git_head": null,
+        "versions": {
+          "compatibility_version": null,
+          "head": null,
+          "stable": "1.2.0",
+          "version_scheme": 0
+        }
+      },
+      "version": "1.2.0"
+    },
+    {
+      "built_as_bottle": true,
+      "files": [
+        {
+          "bytes": 1154,
+          "name": "libimobiledevice.rb",
+          "sha256": "a47281a65e13f9aa4bfeafb48f212ab4bac817ac4daffb169fe6f3cc724c68b2",
+          "source": "/opt/homebrew/Cellar/libimobiledevice/1.4.0/.brew/libimobiledevice.rb"
+        },
+        {
+          "bytes": 294,
+          "name": "AUTHORS",
+          "sha256": "4920ad8427644a779b6d12a51121d69cdb609f26fdfff322c22efa5de7ffb584",
+          "source": "/opt/homebrew/Cellar/libimobiledevice/1.4.0/AUTHORS"
+        },
+        {
+          "bytes": 17988,
+          "name": "COPYING",
+          "sha256": "7619c753cac95d4740220223bde48a032606fcaccde5e546f9bc444c81ab356d",
+          "source": "/opt/homebrew/Cellar/libimobiledevice/1.4.0/COPYING"
+        },
+        {
+          "bytes": 26434,
+          "name": "COPYING.LESSER",
+          "sha256": "e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c",
+          "source": "/opt/homebrew/Cellar/libimobiledevice/1.4.0/COPYING.LESSER"
+        }
+      ],
+      "formula": "libimobiledevice",
+      "poured_from_bottle": true,
+      "source_metadata": {
+        "spec": "stable",
+        "tap": "homebrew/core",
+        "tap_git_head": null,
+        "versions": {
+          "head": null,
+          "stable": "1.4.0",
+          "version_scheme": 0
+        }
+      },
+      "version": "1.4.0"
+    },
+    {
+      "built_as_bottle": true,
+      "files": [
+        {
+          "bytes": 1131,
+          "name": "libimobiledevice-glue.rb",
+          "sha256": "6fc7302ee5d4f470dfea435eda5d769de6a6a9455b492a9cc45efab860bba5ad",
+          "source": "/opt/homebrew/Cellar/libimobiledevice-glue/1.3.2/.brew/libimobiledevice-glue.rb"
+        },
+        {
+          "bytes": 26434,
+          "name": "COPYING",
+          "sha256": "e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c",
+          "source": "/opt/homebrew/Cellar/libimobiledevice-glue/1.3.2/COPYING"
+        }
+      ],
+      "formula": "libimobiledevice-glue",
+      "poured_from_bottle": true,
+      "source_metadata": {
+        "spec": "stable",
+        "tap": "homebrew/core",
+        "tap_git_head": null,
+        "versions": {
+          "head": null,
+          "stable": "1.3.2",
+          "version_scheme": 0
+        }
+      },
+      "version": "1.3.2"
+    },
+    {
+      "built_as_bottle": true,
+      "files": [
+        {
+          "bytes": 1465,
+          "name": "libplist.rb",
+          "sha256": "635a0b7ebf0c25753f1abbbc28c4267d4dddfd116aa758b84581184ff3347597",
+          "source": "/opt/homebrew/Cellar/libplist/2.7.0/.brew/libplist.rb"
+        },
+        {
+          "bytes": 395,
+          "name": "AUTHORS",
+          "sha256": "9ee5828311bc47160791e9fc1574cb356d9d6a661b1d194a97cd254d58c9d3b9",
+          "source": "/opt/homebrew/Cellar/libplist/2.7.0/AUTHORS"
+        },
+        {
+          "bytes": 17988,
+          "name": "COPYING",
+          "sha256": "7619c753cac95d4740220223bde48a032606fcaccde5e546f9bc444c81ab356d",
+          "source": "/opt/homebrew/Cellar/libplist/2.7.0/COPYING"
+        },
+        {
+          "bytes": 26434,
+          "name": "COPYING.LESSER",
+          "sha256": "e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c",
+          "source": "/opt/homebrew/Cellar/libplist/2.7.0/COPYING.LESSER"
+        }
+      ],
+      "formula": "libplist",
+      "poured_from_bottle": true,
+      "source_metadata": {
+        "spec": "stable",
+        "tap": "homebrew/core",
+        "tap_git_head": null,
+        "versions": {
+          "head": null,
+          "stable": "2.7.0",
+          "version_scheme": 0
+        }
+      },
+      "version": "2.7.0"
+    },
+    {
+      "built_as_bottle": true,
+      "files": [
+        {
+          "bytes": 1326,
+          "name": "libusbmuxd.rb",
+          "sha256": "b286274205537f34cc5ddfbb026a46f64f20a0c5b7130e7e9a1f0fb7879aaca1",
+          "source": "/opt/homebrew/Cellar/libusbmuxd/2.1.1/.brew/libusbmuxd.rb"
+        },
+        {
+          "bytes": 140,
+          "name": "AUTHORS",
+          "sha256": "f76632e73560fb36850d2d70cf72960240a82d8c527022a4165370f8a81fa9fc",
+          "source": "/opt/homebrew/Cellar/libusbmuxd/2.1.1/AUTHORS"
+        },
+        {
+          "bytes": 26434,
+          "name": "COPYING",
+          "sha256": "e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c",
+          "source": "/opt/homebrew/Cellar/libusbmuxd/2.1.1/COPYING"
+        }
+      ],
+      "formula": "libusbmuxd",
+      "poured_from_bottle": true,
+      "source_metadata": {
+        "spec": "stable",
+        "tap": "homebrew/core",
+        "tap_git_head": null,
+        "versions": {
+          "head": null,
+          "stable": "2.1.1",
+          "version_scheme": 0
+        }
+      },
+      "version": "2.1.1"
+    },
+    {
+      "built_as_bottle": true,
+      "files": [
+        {
+          "bytes": 1274,
+          "name": "libzip.rb",
+          "sha256": "8dc7006ec08e5968482faa4c019ab055efacb9afcba7471074ce9f06c194da71",
+          "source": "/opt/homebrew/Cellar/libzip/1.11.4_1/.brew/libzip.rb"
+        },
+        {
+          "bytes": 62,
+          "name": "AUTHORS",
+          "sha256": "3a9c401cb1c37ffb14d43c38f21e42ae40b4e6946a04427b8d2be41ac036f163",
+          "source": "/opt/homebrew/Cellar/libzip/1.11.4_1/AUTHORS"
+        },
+        {
+          "bytes": 1454,
+          "name": "LICENSE",
+          "sha256": "01c022eca6d566e2e8792fd0f091a28653b2a608319922bcd4de91c49d1438e1",
+          "source": "/opt/homebrew/Cellar/libzip/1.11.4_1/LICENSE"
+        }
+      ],
+      "formula": "libzip",
+      "poured_from_bottle": true,
+      "source_metadata": {
+        "spec": "stable",
+        "tap": "homebrew/core",
+        "tap_git_head": null,
+        "versions": {
+          "compatibility_version": null,
+          "head": null,
+          "stable": "1.11.4",
+          "version_scheme": 0
+        }
+      },
+      "version": "1.11.4_1"
+    },
+    {
+      "built_as_bottle": true,
+      "files": [
+        {
+          "bytes": 7840,
+          "name": "openssl@3.rb",
+          "sha256": "204067e3af016bba4246c64454f8a1a8d56916dd2f6d021b7bf5dcd13166374b",
+          "source": "/opt/homebrew/Cellar/openssl@3/3.6.3/.brew/openssl@3.rb"
+        },
+        {
+          "bytes": 1022,
+          "name": "AUTHORS.md",
+          "sha256": "b9f638dfc06b59c2d3b808186c3b30f713805a5db390f5b77b1703ac58acb83e",
+          "source": "/opt/homebrew/Cellar/openssl@3/3.6.3/AUTHORS.md"
+        },
+        {
+          "bytes": 10175,
+          "name": "LICENSE.txt",
+          "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+          "source": "/opt/homebrew/Cellar/openssl@3/3.6.3/LICENSE.txt"
+        }
+      ],
+      "formula": "openssl@3",
+      "poured_from_bottle": true,
+      "source_metadata": {
+        "spec": "stable",
+        "tap": "homebrew/core",
+        "tap_git_head": null,
+        "versions": {
+          "compatibility_version": null,
+          "head": null,
+          "stable": "3.6.3",
+          "version_scheme": 0
+        }
+      },
+      "version": "3.6.3"
+    },
+    {
+      "built_as_bottle": true,
+      "files": [
+        {
+          "bytes": 1501,
+          "name": "xz.rb",
+          "sha256": "0812ffeca3c6631a261e87c76ff26368eee0df6ecedfe0f458d67494fdf6e9cc",
+          "source": "/opt/homebrew/Cellar/xz/5.8.3/.brew/xz.rb"
+        },
+        {
+          "bytes": 2146,
+          "name": "AUTHORS",
+          "sha256": "01e6df90d71d591f4307db3f397a5a4fac93b18533f5a3862156f1a0a7dc8610",
+          "source": "/opt/homebrew/Cellar/xz/5.8.3/AUTHORS"
+        },
+        {
+          "bytes": 3119,
+          "name": "COPYING",
+          "sha256": "616a3ad264ce29b8f1cb97e53037b139d406899ca8d1f799651e17bfa09830b8",
+          "source": "/opt/homebrew/Cellar/xz/5.8.3/COPYING"
+        },
+        {
+          "bytes": 607,
+          "name": "COPYING.0BSD",
+          "sha256": "0b01625d853911cd0e2e088dcfb743261034a091bb379246cb25a14cc4c74bf1",
+          "source": "/opt/homebrew/Cellar/xz/5.8.3/COPYING.0BSD"
+        },
+        {
+          "bytes": 17984,
+          "name": "COPYING.GPLv2",
+          "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6",
+          "source": "/opt/homebrew/Cellar/xz/5.8.3/COPYING.GPLv2"
+        },
+        {
+          "bytes": 35149,
+          "name": "COPYING.GPLv3",
+          "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+          "source": "/opt/homebrew/Cellar/xz/5.8.3/COPYING.GPLv3"
+        },
+        {
+          "bytes": 26419,
+          "name": "COPYING.LGPLv2.1",
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",
+          "source": "/opt/homebrew/Cellar/xz/5.8.3/COPYING.LGPLv2.1"
+        }
+      ],
+      "formula": "xz",
+      "poured_from_bottle": true,
+      "source_metadata": {
+        "spec": "stable",
+        "tap": "homebrew/core",
+        "tap_git_head": null,
+        "versions": {
+          "compatibility_version": null,
+          "head": null,
+          "stable": "5.8.3",
+          "version_scheme": 1
+        }
+      },
+      "version": "5.8.3"
+    },
+    {
+      "built_as_bottle": true,
+      "files": [
+        {
+          "bytes": 2573,
+          "name": "zstd.rb",
+          "sha256": "9a9b0183896886e82b915af4db576f27d34d1cee7757d6c5beb0e1eb74c68e0d",
+          "source": "/opt/homebrew/Cellar/zstd/1.5.7_1/.brew/zstd.rb"
+        },
+        {
+          "bytes": 18091,
+          "name": "COPYING",
+          "sha256": "f9c375a1be4a41f7b70301dd83c91cb89e41567478859b77eef375a52d782505",
+          "source": "/opt/homebrew/Cellar/zstd/1.5.7_1/COPYING"
+        },
+        {
+          "bytes": 1549,
+          "name": "LICENSE",
+          "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+          "source": "/opt/homebrew/Cellar/zstd/1.5.7_1/LICENSE"
+        }
+      ],
+      "formula": "zstd",
+      "poured_from_bottle": true,
+      "source_metadata": {
+        "spec": "stable",
+        "tap": "homebrew/core",
+        "tap_git_head": null,
+        "versions": {
+          "compatibility_version": null,
+          "head": null,
+          "stable": "1.5.7",
+          "version_scheme": 0
+        }
+      },
+      "version": "1.5.7_1"
+    }
+  ],
+  "runtime_daemon": "macOS existing usbmuxd; no replacement daemon installed",
+  "schema_version": 1,
+  "status": "candidate_not_clean_mac_verified",
+  "system_dependencies": [
+    "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+    "/System/Library/Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration",
+    "/usr/lib/libSystem.B.dylib",
+    "/usr/lib/libbz2.1.0.dylib",
+    "/usr/lib/libz.1.dylib"
+  ],
+  "tools": [
+    "idevice_id",
+    "ideviceinfo",
+    "idevicesyslog",
+    "ideviceinstaller"
+  ]
+}

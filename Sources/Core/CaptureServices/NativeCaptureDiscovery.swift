@@ -42,6 +42,8 @@ nonisolated struct CaptureToolConfiguration: Sendable {
     var devicectlPath: String? = nil
     var idevicesyslogPath: String? = nil
     var ideviceinfoPath: String? = nil
+    var ideviceIDPath: String? = nil
+    var ideviceInstallerPath: String? = nil
 }
 
 nonisolated struct NativeCaptureDevice: Codable, Identifiable, Sendable, Equatable {
@@ -83,17 +85,26 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
         let ideviceinfo = try resolve(configuration.ideviceinfoPath, name: "ideviceinfo", candidates: [
             "/opt/homebrew/bin/ideviceinfo", "/usr/local/bin/ideviceinfo",
         ])
+        let ideviceID = try resolve(configuration.ideviceIDPath, name: "idevice_id", candidates: [
+            "/opt/homebrew/bin/idevice_id", "/usr/local/bin/idevice_id",
+        ])
+        let installer = try resolve(configuration.ideviceInstallerPath, name: "ideviceinstaller", candidates: [
+            "/opt/homebrew/bin/ideviceinstaller", "/usr/local/bin/ideviceinstaller",
+        ])
         var warnings: [String] = []
-        if simctl == nil, FileManager.default.isExecutableFile(atPath: "/usr/bin/xcrun") {
-            let result = try await runner.run(URL(fileURLWithPath: "/usr/bin/xcrun"), arguments: ["--find", "simctl"])
-            if result.isSuccess, !result.stdout.trimmed.isEmpty {
-                simctl = try resolve(result.stdout.trimmed, name: "simctl", candidates: [])
+        // xcode-select only reports an existing selection; unlike xcrun on an unprepared Mac,
+        // it does not request developer-tools installation. USB discovery below needs no Xcode.
+        if simctl == nil || devicectl == nil {
+            var developer = environment["DEVELOPER_DIR"]
+            if developer == nil, FileManager.default.isExecutableFile(atPath: "/usr/bin/xcode-select") {
+                let result = try await runner.run(URL(fileURLWithPath: "/usr/bin/xcode-select"), arguments: ["--print-path"])
+                if result.isSuccess, result.stdout.trimmed.hasPrefix("/") { developer = result.stdout.trimmed }
             }
-        }
-        if devicectl == nil, FileManager.default.isExecutableFile(atPath: "/usr/bin/xcrun") {
-            let result = try await runner.run(URL(fileURLWithPath: "/usr/bin/xcrun"), arguments: ["--find", "devicectl"])
-            if result.isSuccess, !result.stdout.trimmed.isEmpty {
-                devicectl = try resolve(result.stdout.trimmed, name: "devicectl", candidates: [])
+            if let developer, developer.hasPrefix("/") {
+                var root = URL(fileURLWithPath: developer)
+                if root.pathExtension == "app" { root.appendPathComponent("Contents/Developer") }
+                if simctl == nil { simctl = try resolve(nil, name: "simctl", candidates: [root.appendingPathComponent("usr/bin/simctl").path]) }
+                if devicectl == nil { devicectl = try resolve(nil, name: "devicectl", candidates: [root.appendingPathComponent("usr/bin/devicectl").path]) }
             }
         }
         var tools: [String: String] = [:]
@@ -103,6 +114,8 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
         if let devicectl { tools["devicectl"] = devicectl.path }
         if let idevicesyslog { tools["idevicesyslog"] = idevicesyslog.path }
         if let ideviceinfo { tools["ideviceinfo"] = ideviceinfo.path }
+        if let ideviceID { tools["idevice_id"] = ideviceID.path }
+        if let installer { tools["ideviceinstaller"] = installer.path }
         var devices: [NativeCaptureDevice] = []
         if let adb {
             let command = CaptureServiceCommand.androidDevices(adb: adb)
@@ -118,6 +131,41 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
                 catch { warnings.append("Simulator discovery returned unreadable device information: \(error.localizedDescription)") }
             } else { warnings.append(Self.failure("Simulator discovery", result: result)) }
         }
+        // Explicit CoreDevice overrides preserve fixture/developer isolation unless USB ID
+        // discovery is also explicitly requested. Installed/bundled tools otherwise work equally.
+        if (configuration.devicectlPath == nil || configuration.ideviceIDPath != nil), let ideviceID, let ideviceinfo {
+            let result = try await runner.run(ideviceID, arguments: ["--list"])
+            if result.isSuccess {
+                let ids = Self.parseUSBDeviceIDs(result.stdout)
+                if ids.count > 8 { warnings.append("USB discovery checks the first eight attached device identities at a time.") }
+                let runner = self.runner
+                let probes = try await withThrowingTaskGroup(of: USBProbe.self) { group in
+                    for id in ids.prefix(8) {
+                        group.addTask {
+                            do {
+                                // --simple avoids libimobiledevice's automatic pairing handshake.
+                                let info = try await runner.run(ideviceinfo, arguments: ["--simple", "--udid", id, "--xml"])
+                                guard info.isSuccess else {
+                                    return USBProbe(device: NativeCaptureDevice(id: id, name: "iPhone USB device", platform: "iphone", state: "needs trust"), warning: "USB device metadata is unavailable. Unlock/trust this Mac in Finder, then check again.")
+                                }
+                                return USBProbe(device: try Self.parseUSBIPhoneInfo(Data(info.stdout.utf8), expectedID: id), warning: nil)
+                            } catch is CancellationError { throw CancellationError() }
+                            catch {
+                                return USBProbe(device: NativeCaptureDevice(id: id, name: "iPhone USB device", platform: "iphone", state: "unavailable"), warning: "USB discovery returned unreadable identity metadata. Reconnect and check this phone with an engineer.")
+                            }
+                        }
+                    }
+                    var result: [USBProbe] = []
+                    for try await probe in group { result.append(probe) }
+                    return result
+                }
+                devices += probes.compactMap(\.device).sorted { $0.id < $1.id }
+                warnings += probes.compactMap(\.warning)
+                if probes.contains(where: { $0.device != nil }) {
+                    warnings.append("USB iPhone detection is ready to try, not verified logging/trust. Explicit app/check access may ask for normal phone trust. Verify fresh emitted logs before claiming USB logging works.")
+                }
+            } else { warnings.append("USB iPhone discovery is unavailable. Check the USB connection and this build's USB tools with an engineer.") }
+        }
         if let devicectl {
             // devicectl's JSON file is its supported automation interface. Its console output is not.
             let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("capture-iphone-discovery-\(UUID().uuidString)", isDirectory: true)
@@ -128,7 +176,9 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
                 let command = CaptureServiceCommand.iphoneDevices(devicectl: devicectl, jsonOutput: jsonOutput)
                 let result = try await runner.run(command.executable, arguments: command.arguments)
                 if result.isSuccess {
-                    devices += try Self.parseIPhoneDevices(Data(contentsOf: jsonOutput))
+                    let coreDevices = try Self.parseIPhoneDevices(Data(contentsOf: jsonOutput))
+                    // A failed current USB probe must not be made green by a cached Wi-Fi entry.
+                    devices += coreDevices.filter { incoming in !devices.contains { $0.platform == incoming.platform && $0.id == incoming.id } }
                 } else { warnings.append(Self.failure("iPhone discovery", result: result)) }
             } catch is CancellationError { throw CancellationError() }
             catch { warnings.append("iPhone discovery returned unreadable device information: \(error.localizedDescription)") }
@@ -162,6 +212,8 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
         switch name {
         case "adb": relative = "Contents/MacOS/capture-adb"
         case "mitmdump": relative = "Contents/Frameworks/CaptureDependencies/mitmproxy.app/Contents/MacOS/mitmdump"
+        case "idevice_id", "ideviceinfo", "idevicesyslog", "ideviceinstaller":
+            relative = "Contents/Frameworks/CaptureUSBTools.app/Contents/MacOS/" + name
         default: return nil
         }
         let candidate = applicationBundle.appendingPathComponent(relative)
@@ -175,6 +227,27 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
         let macOS = executable.deletingLastPathComponent(), contents = macOS.deletingLastPathComponent()
         let app = contents.deletingLastPathComponent()
         return macOS.lastPathComponent == "MacOS" && contents.lastPathComponent == "Contents" && app.pathExtension == "app" ? app : nil
+    }
+
+    private struct USBProbe: Sendable { let device: NativeCaptureDevice?; let warning: String? }
+
+    static func parseUSBDeviceIDs(_ output: String) -> [String] {
+        Array(Set(output.split(whereSeparator: \.isNewline).map { String($0).trimmed }.filter {
+            (16...64).contains($0.utf8.count) && $0.utf8.allSatisfy { (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) || $0 == 45 }
+        })).sorted()
+    }
+
+    static func parseUSBIPhoneInfo(_ data: Data, expectedID: String) throws -> NativeCaptureDevice? {
+        guard data.count <= 1_048_576,
+              let info = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let identifier = info["UniqueDeviceID"] as? String, identifier.caseInsensitiveCompare(expectedID) == .orderedSame,
+              let product = info["ProductType"] as? String else { throw AppError("USB metadata identity is incomplete or mismatched.") }
+        guard product.hasPrefix("iPhone") else { return nil }
+        let label = (info["DeviceName"] as? String)?.trimmed
+        let name = label.map { String($0.prefix(128)) }.flatMap { $0.isEmpty ? nil : $0 } ?? product
+        // Basic lockdownd metadata is detection only. Access/trust is revalidated during an
+        // explicit bounded check before routing; discovery never pairs or launches collectors.
+        return NativeCaptureDevice(id: expectedID, name: name, platform: "iphone", state: "ready")
     }
 
     static func parseAndroidDevices(_ output: String) -> [NativeCaptureDevice] {

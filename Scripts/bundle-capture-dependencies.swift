@@ -243,6 +243,8 @@ struct CaptureDependencyBundler {
                 "license_expression": values("License-Expression"), "license": values("License"), "license_files": values("License-File"),
                 "license_classifiers": values("Classifier").filter { $0.hasPrefix("License ::") }]
         }
+        let engineInfo = try PropertyListSerialization.propertyList(from: Data(contentsOf: engine.appendingPathComponent("Contents/Info.plist")), format: nil) as? [String: Any]
+        let engineIdentifier = engineInfo?["CFBundleIdentifier"] as? String ?? "unknown"
         let value: [String: Any] = ["schema_version": 1, "architecture": lock.architecture, "mitmproxy_version": lock.mitmproxyVersion,
             "python_version": lock.pythonVersion, "openssl_version": lock.opensslVersion, "adb_version": lock.adbVersion,
             "source_lock_sha256": lockDigest, "mitmdump": engineRelative + "/Contents/MacOS/mitmdump", "adb": adbRelative,
@@ -251,7 +253,7 @@ struct CaptureDependencyBundler {
             "preserved_upstream_notice_files": bundledNotices.map(\.path),
             "declared_python_distribution_metadata": packages,
             "additional_notice_sources": lock.noticeSources,
-            "packaging_changes": ["nested_app_executable": "mitmdump", "nested_app_identifier": "dev.mobilecapture.network-engine",
+            "packaging_changes": ["nested_app_executable": "mitmdump", "nested_app_identifier": engineIdentifier,
                 "upstream_wrapper_relocated_to_resource": "Contents/Resources/upstream-mitmproxy-wrapper.txt", "upstream_source_file_contents_retained": true],
             "license_inventory_scope": "All supplied upstream app files/notices, platform-tools NOTICE.txt, and the additional exact-version notices. Frozen upstream component coverage is not a complete dependency SBOM."]
         let target = app.appendingPathComponent(metadataRelative + "/dependencies.json")
