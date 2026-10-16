@@ -6,15 +6,21 @@ cd "$(dirname "$0")/.."
 MODE=release
 PRODUCT=capture
 NOTARIZE=1
+USB_CANDIDATE=0
 for argument in "$@"; do
   case "$argument" in
     --development) MODE=development; NOTARIZE=0 ;;
     --skip-notarize) NOTARIZE=0 ;;
     --oh-my-android) PRODUCT=android ;;
     --mobile-capture) PRODUCT=capture ;;
-    *) print -u2 "Usage: Scripts/release.sh [--development | --skip-notarize] [--mobile-capture | --oh-my-android]"; exit 2 ;;
+    --experimental-iphone-usb) USB_CANDIDATE=1 ;;
+    *) print -u2 "Usage: Scripts/release.sh [--development | --skip-notarize] [--mobile-capture | --oh-my-android] [--experimental-iphone-usb]"; exit 2 ;;
   esac
 done
+if (( USB_CANDIDATE )) && [[ "$MODE" != development || "$PRODUCT" != capture ]]; then
+  print -u2 "The experimental iPhone USB candidate is available only for a Mobile Capture development build."
+  exit 2
+fi
 IDENTITY=-
 BUILD_OPTIONS=()
 if [[ "$PRODUCT" == capture ]]; then
@@ -68,6 +74,10 @@ if [[ "$PRODUCT" == capture ]]; then
   fi
   swift Scripts/bundle-capture-dependencies.swift install --app "$APP" \
     --cache-root "$CAPTURE_DEPENDENCY_CACHE" --sign "$IDENTITY"
+  if (( USB_CANDIDATE )); then
+    python3 -B Scripts/bundle-iphone-usb-candidate.py install --app "$APP" \
+      --lock Dependencies/Capture/iphone-usb-arm64.candidate.lock.json --sign "$IDENTITY"
+  fi
 fi
 SIGN=(/usr/bin/codesign --force --sign "$IDENTITY")
 if [[ "$MODE" == release ]]; then SIGN+=(--options runtime --timestamp)
@@ -90,6 +100,9 @@ for helper in "${HELPERS[@]}"; do "${SIGN[@]}" "$APP/Contents/MacOS/$helper"; do
 python3 -B Scripts/check-capture-product.py --product "$PRODUCT" --app "$APP"
 if [[ "$PRODUCT" == capture ]]; then
   swift Scripts/bundle-capture-dependencies.swift smoke --app "$APP" --cache-root "$CAPTURE_DEPENDENCY_CACHE"
+  if (( USB_CANDIDATE )); then
+    python3 -B Scripts/bundle-iphone-usb-candidate.py smoke --app "$APP"
+  fi
 else
   Scripts/test-mcp.py "$APP/Contents/MacOS/ohmyandroid-mcp"
 fi

@@ -1,8 +1,9 @@
 # Standalone Mobile Capture implementation
 
-This work follows [the standalone plan](CAPTURE-STANDALONE-PLAN.md). It does not
-implement the separate capture MCP or guided setup, and it does not change device
-routing, certificates, saved sessions or private iPhone profiles during validation.
+These migration checkpoints follow [the standalone plan](CAPTURE-STANDALONE-PLAN.md).
+Guided setup was implemented afterward; see [its implementation report](CAPTURE-SETUP-IMPLEMENTATION.md).
+The separate capture MCP remains planned. Migration validation did not change
+device routing, certificates, saved sessions or private iPhone profiles.
 
 ## Checkpoint 1: service boundary and handoff
 

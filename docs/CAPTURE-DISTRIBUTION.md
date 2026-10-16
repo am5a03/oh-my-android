@@ -15,13 +15,14 @@ and evidence export use native Swift components. The remaining Python interprete
 is embedded inside the isolated mitmproxy network engine. Testers do not install
 Python, Homebrew, mitmproxy, Android Studio or the Android SDK for Android capture.
 iOS Simulator users still need Xcode and an installed Simulator runtime.
-Physical iPhone users need full Xcode's `devicectl` for discovery; the standalone
-Command Line Tools installation is insufficient. USB log
-capture additionally needs `libimobiledevice` installed once on the Mac
-(`brew install libimobiledevice`). That collector is not bundled in this
-checkpoint. Network capture uses the bundled engine plus WireGuard on the
-iPhone; its private profile and the public CA are configured through
-**Set Up iPhone Capture…**. See [the iPhone workflow](CAPTURE.md).
+Physical iPhone remains an engineer-assisted route. Discovery can use the USB
+utilities `idevice_id` and `ideviceinfo --simple` without Xcode, with full Xcode's
+`devicectl` as a fallback. USB app enumeration/logging also needs
+`ideviceinstaller` and `idevicesyslog`. The ordinary package does not bundle those
+USB tools yet; an explicitly selected development candidate can include them as
+described below. Network capture uses the bundled engine plus WireGuard on the
+iPhone. **Set Up Capture** guides profile import, certificate trust, a bounded
+capture check and recording; see [guided setup](CAPTURE-SETUP-IMPLEMENTATION.md).
 
 The physical-iPhone implementation checkpoint adds device discovery, USB logs
 and WireGuard lifecycle support. Separate physical USB-log and network-only
@@ -29,8 +30,27 @@ capture/export runs are verified in the [proof report](CAPTURE-PROOF.md#physical
 A completed combined hardware proof remains pending. The network engine's
 observed shutdown crash and fresh-machine setup must be resolved before an
 AdOps release. App-scoped bounded logging is implemented and tested separately;
-see [the logging validation report](CAPTURE-LOGGING-VALIDATION.md). The prepared build still contains only the dependency payloads
-listed below; it does not silently install the extra USB collector.
+see [the logging validation report](CAPTURE-LOGGING-VALIDATION.md). USB detection,
+successful tool launch and a browser HTTPS check do not establish selected-app
+logging or SDK compatibility.
+
+## Experimental iPhone USB development bundle
+
+`Scripts/release-mobile-capture.sh --development --experimental-iphone-usb`
+explicitly includes the pinned local arm64 candidate from
+`Dependencies/Capture/iphone-usb-arm64.candidate.lock.json`. The build machine
+must have the exact reviewed source inputs; the packager fails on changed files.
+It relocates four utilities and nine libraries into `CaptureUSBTools.app`, keeps
+supplied notices/source recipes and a sealed manifest, signs the nested code, then
+signs the outer app and runs version-only probes with a clean `PATH`.
+No USB daemon is installed and these packaging probes contact no devices.
+
+The candidate passes static closure, signatures and version-only smoke on this
+development Mac. It still needs clean-Mac/iOS pairing, app enumeration, bounded
+logging, SSL-provider and Developer ID/notarization validation, plus upstream
+source-distribution requirements before release. The flag is rejected for release
+and Oh My Android builds. It is a development option, not a supported public USB
+distribution promise.
 
 The reviewed dependency lock currently supports **Apple Silicon / arm64 only**:
 

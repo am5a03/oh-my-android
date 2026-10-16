@@ -116,6 +116,8 @@ one ZIP with a shared timeline. It includes full request/response bodies,
 reproduction markers and raw evidence references. Oh My Android’s optional
 **Open Mobile Capture…** launcher passes the selected device/app; neither app
 requires the other. See [setup and scope](docs/CAPTURE.md) and
+[guided setup](docs/CAPTURE-SETUP-IMPLEMENTATION.md), including engineer task
+import, bounded capture checks and an engineer handoff summary. See
 [independent development builds](docs/CAPTURE-DISTRIBUTION.md). Physical-iPhone
 combined capture and network-engine shutdown remain release acceptance work.
 
