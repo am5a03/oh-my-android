@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var panel: PanelController?
     private var inspector: InspectorWindowController?
     private var layoutInspector: LayoutInspectorWindowController?
+    let captureLauncher = CaptureAppLauncher.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let inspector = InspectorWindowController(store: InspectorStore(reader: RunAsAppDataReader()))
@@ -34,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         panel = PanelController(model: model)
         panel?.show()
+        if ProcessInfo.processInfo.arguments.contains("--capture") { openCapture() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -44,6 +46,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Menu-bar entry points; the panel icons call the same host actions.
     func openLayoutInspector() { if let context = model.context { model.host.openLayoutInspector(context, nil) } }
     func openDataInspector() { if let context = model.context { model.host.openDataInspector(context) } }
+    func openCapture() {
+        let context: CaptureHandoff.Context?
+        if model.platform == .android, let device = model.devices?.selected, device.isReady {
+            let app = model.apps.matches(device) && model.apps.selectedIsInstalled ? model.apps.selected?.package : nil
+            context = .init(platform: .android, deviceID: device.serial, applicationID: app)
+        } else if model.platform != .android, let device = model.simulators.selected, device.isReady {
+            context = .init(platform: .simulator, deviceID: device.udid, applicationID: model.simulators.selectedApp?.bundleID)
+        } else { context = nil }
+        Task { @MainActor in
+            do {
+                if let message = try await captureLauncher.open(context: context) {
+                    model.features.show(Toast(kind: .info, message: message))
+                }
+            } catch CaptureCompanionLaunchError.missing {
+                if captureLauncher.offerSetup() { openCapture() }
+            } catch {
+                model.features.show(Toast(kind: .error, message: "Could not open Mobile Capture: \(error.localizedDescription)"))
+                panel?.show()
+            }
+        }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) { captureLauncher.refreshAvailability() }
 
     /// PNG/JPEG opened with the app (Dock drop, "Open with", `open -a`) becomes a design overlay.
     func application(_ application: NSApplication, open urls: [URL]) {

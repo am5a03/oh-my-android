@@ -11,10 +11,34 @@ permissions:
 jobs:
   build:
     runs-on: macos-26
+    strategy:
+      matrix:
+        include:
+          - scheme: OhMyAndroid
+            bundle: Oh My Android.app
+            product: android
+          - scheme: MobileCapture
+            bundle: Mobile Capture.app
+            product: capture
     steps:
       - uses: actions/checkout@v4
+      - name: Test companion handoff and discovery
+        if: matrix.product == 'android'
+        run: |
+          bash Scripts/test-capture-handoff.sh
+          bash Scripts/test-capture-companion-launcher.sh
       - name: Test selected-app quick actions
         run: bash Scripts/test-quick-actions.sh
+      - name: Test first-run setup, Doctor and evidence handoff
+        if: matrix.product == 'capture'
+        run: |
+          bash Scripts/test-capture-plan.sh
+          bash Scripts/test-capture-setup-readiness.sh
+          bash Scripts/test-capture-setup-store.sh
+          bash Scripts/test-capture-doctor.sh
+          bash Scripts/test-native-capture-services.sh
+          bash Scripts/test-native-timeline.sh
+          python3 -m unittest discover -s Tests/Capture -p test_setup_probe.py -v
       - name: Test iOS Simulator quick actions
         run: bash Scripts/test-simulator.sh
       - name: Install XcodeGen
@@ -23,7 +47,12 @@ jobs:
         run: xcodegen generate
       - name: Build (warnings are errors)
         run: |
-          xcodebuild -project OhMyAndroid.xcodeproj -scheme OhMyAndroid -configuration Release \
+          xcodebuild -project OhMyAndroid.xcodeproj -scheme "${{ matrix.scheme }}" -configuration Release \
             -derivedDataPath build/DerivedData CODE_SIGN_IDENTITY=- build
+      - name: Check independent product boundaries
+        run: |
+          python3 -B Scripts/check-capture-product.py --product "${{ matrix.product }}" \
+            --app "build/DerivedData/Build/Products/Release/${{ matrix.bundle }}" --allow-unbundled-dependencies
       - name: Test MCP server protocol
+        if: matrix.product == 'android'
         run: Scripts/test-mcp.py "build/DerivedData/Build/Products/Release/Oh My Android.app/Contents/MacOS/ohmyandroid-mcp"

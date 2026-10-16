@@ -13,6 +13,12 @@ struct OhMyAndroidApp: App {
         Settings {
             SettingsView().environment(delegate.model).environment(delegate.updates)
         }
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button(delegate.captureLauncher.menuTitle) { delegate.openCapture() }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+            }
+        }
     }
 }
 
@@ -33,6 +39,7 @@ private struct MenuBarContent: View {
             .disabled(delegate.model.context == nil)
         Button("Data Inspector…") { delegate.openDataInspector() }
             .disabled(delegate.model.context == nil)
+        Button(delegate.captureLauncher.menuTitle) { delegate.openCapture() }
         Divider()
         Button("Restart adb") { Task { await delegate.model.devices?.restartServer() } }
             .disabled(delegate.model.devices == nil)
@@ -47,6 +54,7 @@ private struct MenuBarContent: View {
         }
         Divider()
         Button("Check for Updates…") { delegate.updates.checkForUpdates() }
+            .disabled(!delegate.updates.isAvailable)
         Button("Settings…") { showSettings(tab: "general") }
             .keyboardShortcut(",")
         Button("Quit Oh My Android") { NSApplication.shared.terminate(nil) }

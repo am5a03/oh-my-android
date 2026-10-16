@@ -1,0 +1,1658 @@
+{
+  "adbFiles" : [
+    {
+      "bytes" : 1152421,
+      "kind" : "file",
+      "path" : "NOTICE.txt",
+      "sha256" : "356cc66516060e4da6bdc53e6f0bbb8e8101673f326b73c68d535eddd04dd7b1"
+    },
+    {
+      "bytes" : 18844128,
+      "kind" : "file",
+      "path" : "adb",
+      "sha256" : "1811e253b21b12cbfda7201ebaf86c10e7ddcb5c606a7a81f7c82b4c429c2d3b"
+    },
+    {
+      "bytes" : 38,
+      "kind" : "file",
+      "path" : "source.properties",
+      "sha256" : "2dccd788c0234d8cf7f7457377e57f57527a86a629c6ed54feb8af0f549dac38"
+    }
+  ],
+  "adbVersion" : "37.0.1-15733141",
+  "additionalNotices" : [
+    {
+      "bytes" : 10175,
+      "kind" : "file",
+      "path" : "OpenSSL-3.5.5-LICENSE.txt",
+      "sha256" : "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+    },
+    {
+      "bytes" : 13804,
+      "kind" : "file",
+      "path" : "Python-3.14.4-LICENSE.txt",
+      "sha256" : "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231"
+    },
+    {
+      "bytes" : 1079,
+      "kind" : "file",
+      "path" : "mitmproxy-12.2.3-LICENSE.txt",
+      "sha256" : "cc4ab04ed7180af6c0ede7147f9ec2aa05212c088d7b3c8e38bbffe91c9c8f82"
+    }
+  ],
+  "architecture" : "arm64",
+  "mitmproxyArchiveSHA256" : "0a09ee3b82569e8985aff8186e4792618b8e5d0c766098db093d09a87d4b013a",
+  "mitmproxyArchiveURL" : "https://downloads.mitmproxy.org/12.2.3/mitmproxy-12.2.3-macos-arm64.tar.gz",
+  "mitmproxyFiles" : [
+    {
+      "bytes" : 37,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/Python",
+      "sha256" : "cf06376aa3770c0628ba018161cc23ae796a1b44f16c0c549253235554261385",
+      "target" : "Python.framework/Versions/3.14/Python"
+    },
+    {
+      "bytes" : 23,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/Python.framework/Python",
+      "sha256" : "58b6d3feb91aa56156137e1a1e34b919a2d020b9c233f34d004b1da956a84aab",
+      "target" : "Versions/Current/Python"
+    },
+    {
+      "bytes" : 26,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/Python.framework/Resources",
+      "sha256" : "59991b51b8ee15b59f07ec45942957a4ce90494257766964f5df60b7c7998e42",
+      "target" : "Versions/Current/Resources"
+    },
+    {
+      "bytes" : 5470336,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/Python.framework/Versions/3.14/Python",
+      "sha256" : "ed9fd8f58a9cf8f204cb9df20a10b7273acd223c165043984509087cded78b41"
+    },
+    {
+      "bytes" : 972,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/Python.framework/Versions/3.14/Resources/Info.plist",
+      "sha256" : "133021f713ec7003c88a12658e399c44d4792a0a041a6ae50b748cd6b1a438fa"
+    },
+    {
+      "bytes" : 2442,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/Python.framework/Versions/3.14/_CodeSignature/CodeResources",
+      "sha256" : "f03838cb0c0df29d4639134c6be3d2489d8e3c6bd926792737f51f831f847a3c"
+    },
+    {
+      "bytes" : 4,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/Python.framework/Versions/Current",
+      "sha256" : "2efff1261c25d94dd6698ea1047f5c0a7107ca98b0a6c2427ee6614143500215",
+      "target" : "3.14"
+    },
+    {
+      "bytes" : 104432,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/_argon2_cffi_bindings/_ffi.abi3.so",
+      "sha256" : "3739201864fb54e14e5022556dd4d3b72e91879603998f44e7785aea837b3113"
+    },
+    {
+      "bytes" : 955360,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/_brotli.cpython-314-darwin.so",
+      "sha256" : "9402744eb4cbfd330e922b29cee3137f28ad2c3512e6ee8a8be035baf725cd39"
+    },
+    {
+      "bytes" : 247744,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/_cffi_backend.cpython-314-darwin.so",
+      "sha256" : "8b1e94efe31bd2f94d4aaee3bbed58180260740ec1cfaff8a4a52d12b4269726"
+    },
+    {
+      "bytes" : 72256,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/aioquic/_buffer.abi3.so",
+      "sha256" : "f908046709102d7dd799740de60c1f02599750d4953307178ca3817598669d90"
+    },
+    {
+      "bytes" : 3981376,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/aioquic/_crypto.abi3.so",
+      "sha256" : "87f9a50a9b5b37fa853b728a22688004027d4c5b953aebd45ab8f9eef507b947"
+    },
+    {
+      "bytes" : 41,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/argon2_cffi-25.1.0.dist-info",
+      "sha256" : "49876c9239433750f03d6bd7a3450ee84fa5646446c90df505d1f164447588e1",
+      "target" : "../Resources/argon2_cffi-25.1.0.dist-info"
+    },
+    {
+      "bytes" : 35,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/attrs-25.4.0.dist-info",
+      "sha256" : "c202d25a8e23436343624f5992ad18bcab0fb5f02f559f1bd1b462910f0dd7b6",
+      "target" : "../Resources/attrs-25.4.0.dist-info"
+    },
+    {
+      "bytes" : 29,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/base_library.zip",
+      "sha256" : "5c362d2dcb098e9a7fb7b2a93940128de5fb0f6dc2f28fda425307f33f50f2fb",
+      "target" : "../Resources/base_library.zip"
+    },
+    {
+      "bytes" : 584352,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/bcrypt/_bcrypt.abi3.so",
+      "sha256" : "03b0eda0b05ce2b4344c000bb3133677c06dd2f2e526e019b3013573191565ab"
+    },
+    {
+      "bytes" : 20,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/certifi",
+      "sha256" : "95e76a57d655572ba1101d8a17955806e1076beca044062a3f6c71c8c507c509",
+      "target" : "../Resources/certifi"
+    },
+    {
+      "bytes" : 68496,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/charset_normalizer/md.cpython-314-darwin.so",
+      "sha256" : "3072b0bb0b383bbcbd999a220c2fa8d1940aa288e682e5a27b4c1e9065930c45"
+    },
+    {
+      "bytes" : 275088,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/charset_normalizer/md__mypyc.cpython-314-darwin.so",
+      "sha256" : "14f789ff9f06fb7f8f1ba17ba02463acfa08fd61928f313e22de374f0eeaa249"
+    },
+    {
+      "bytes" : 34,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/click-8.3.1.dist-info",
+      "sha256" : "61e6f55c39879cdc4c0002f2e76b770352b1fb2121d5ca6b70b28d1f2c536dd1",
+      "target" : "../Resources/click-8.3.1.dist-info"
+    },
+    {
+      "bytes" : 42,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/cryptography-46.0.4.dist-info",
+      "sha256" : "514f6c36a73440b18c0c0056f176adae2def320813f9a5aa33cb466f2b465388",
+      "target" : "../Resources/cryptography-46.0.4.dist-info"
+    },
+    {
+      "bytes" : 10021408,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/cryptography/hazmat/bindings/_rust.abi3.so",
+      "sha256" : "6f178d4ac48b221abc50caf6c2d3566e406a1cd6799cd34d02046568950179fd"
+    },
+    {
+      "bytes" : 34,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/flask-3.1.2.dist-info",
+      "sha256" : "500be1b9d88870ceca0fe9b0c77d654da66c34b61b677108fbcfb04ae70f4de6",
+      "target" : "../Resources/flask-3.1.2.dist-info"
+    },
+    {
+      "bytes" : 31,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/h2-4.3.0.dist-info",
+      "sha256" : "85835ab03ed6da53e343f1a47acb7ebb663c4cd6205807e5f4f1ee23c3b04a66",
+      "target" : "../Resources/h2-4.3.0.dist-info"
+    },
+    {
+      "bytes" : 41,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/itsdangerous-2.2.0.dist-info",
+      "sha256" : "9850213f25fdaf9ffe22088d17ba24a25eb87d0e183d80f7f385f8318e0708bd",
+      "target" : "../Resources/itsdangerous-2.2.0.dist-info"
+    },
+    {
+      "bytes" : 4872176,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/libcrypto.3.dylib",
+      "sha256" : "654beba6527255ef78332aa279187eb28acf5d6e8aad9bbd6b7901f7eeb373b2"
+    },
+    {
+      "bytes" : 185648,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/liblzma.5.dylib",
+      "sha256" : "9453b43918aa25ef99f90a58d61c49980c4e0fd892d339ccf50c0e2b86e8be07"
+    },
+    {
+      "bytes" : 189648,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/libmpdec.4.dylib",
+      "sha256" : "b6573c64b7e2709ac5d753c3a0f5b81c7d5bd3eace7b9c0be5e8b5d9092ac443"
+    },
+    {
+      "bytes" : 905648,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/libssl.3.dylib",
+      "sha256" : "8542876019f52c39cac95e60535f102fdf4976cf5a87e4b87af0dcbc2a0ae1d1"
+    },
+    {
+      "bytes" : 653504,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/libzstd.1.dylib",
+      "sha256" : "746b63388383910007809dc4b6c5a547c7309dcef3c04f83a25b5e8c3caa55af"
+    },
+    {
+      "bytes" : 39,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/markupsafe-3.0.3.dist-info",
+      "sha256" : "3b6a675ffa823c9b337b56ce403ea79943374bc3ec3bfd71b62a7acaf9ce3d84",
+      "target" : "../Resources/markupsafe-3.0.3.dist-info"
+    },
+    {
+      "bytes" : 68944,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/markupsafe/_speedups.cpython-314-darwin.so",
+      "sha256" : "d232cb666a790ee61d4d5690a726241fd857821b9bdfaedf9576954d2d293a9b"
+    },
+    {
+      "bytes" : 22,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/mitmproxy",
+      "sha256" : "d9699aeb82fb879a9b33c0d90dfdafc83bf5e2f57218d333b98627f84d12d350",
+      "target" : "../Resources/mitmproxy"
+    },
+    {
+      "bytes" : 28,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/mitmproxy_macos",
+      "sha256" : "686b8ef431f5580b6a12af69d93542484e43751ace4ed947a98f17111201e040",
+      "target" : "../Resources/mitmproxy_macos"
+    },
+    {
+      "bytes" : 41,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/mitmproxy_rs/__init__.pyi",
+      "sha256" : "772c23fb10715b768ce3830837c55c07f28f2e92f686f484ab68b90c9aaafe37",
+      "target" : "../../Resources/mitmproxy_rs/__init__.pyi"
+    },
+    {
+      "bytes" : 38,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/mitmproxy_rs/certs.pyi",
+      "sha256" : "2feb72eeba881af7581e9698a85ad0410f5dcf26a3bd17143e477e5d3cdcc055",
+      "target" : "../../Resources/mitmproxy_rs/certs.pyi"
+    },
+    {
+      "bytes" : 45,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/mitmproxy_rs/contentviews.pyi",
+      "sha256" : "8a53fc9210ad191e0e77e7b331132ca174e65b62e3675df6449fdcf390eb912d",
+      "target" : "../../Resources/mitmproxy_rs/contentviews.pyi"
+    },
+    {
+      "bytes" : 36,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/mitmproxy_rs/dns.pyi",
+      "sha256" : "f37480d45d4a1fcacfb7a3906d55ce19f31b5d0d8bbb3c2f372f77bfd0026320",
+      "target" : "../../Resources/mitmproxy_rs/dns.pyi"
+    },
+    {
+      "bytes" : 38,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/mitmproxy_rs/local.pyi",
+      "sha256" : "2f225c4996662b42bded69b8c0d9980e3dd242a4cf1bb8fd130c5f8c0f13e0b7",
+      "target" : "../../Resources/mitmproxy_rs/local.pyi"
+    },
+    {
+      "bytes" : 8856464,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/mitmproxy_rs/mitmproxy_rs.abi3.so",
+      "sha256" : "7adec3ee845b6a39d3a7f6de00c9d527900041a6b0ae3300a7875cb0c8cb8ed8"
+    },
+    {
+      "bytes" : 45,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/mitmproxy_rs/process_info.pyi",
+      "sha256" : "5d864110a888c6a9b8051e928712bbf71a6999752ecd4008cb5eb23d854f3a31",
+      "target" : "../../Resources/mitmproxy_rs/process_info.pyi"
+    },
+    {
+      "bytes" : 37,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/mitmproxy_rs/py.typed",
+      "sha256" : "ed6b914ff25cba76e753f62a349a2999049a9c22f56d30cc1d6b779f05940f9d",
+      "target" : "../../Resources/mitmproxy_rs/py.typed"
+    },
+    {
+      "bytes" : 49,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/mitmproxy_rs/syntax_highlight.pyi",
+      "sha256" : "25e2ce3b2c82a8f04c218b47288e1b53a29339957c71a78cadf337e11834d6dd",
+      "target" : "../../Resources/mitmproxy_rs/syntax_highlight.pyi"
+    },
+    {
+      "bytes" : 36,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/mitmproxy_rs/tun.pyi",
+      "sha256" : "9af183668df2ee8fb83f4245333e46199526fe83572b4eb41ae12f8bc17beb73",
+      "target" : "../../Resources/mitmproxy_rs/tun.pyi"
+    },
+    {
+      "bytes" : 36,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/mitmproxy_rs/udp.pyi",
+      "sha256" : "d7eb581abb65bfe03116339a96ed2320f555e7b1a99624a1b756bc545700a126",
+      "target" : "../../Resources/mitmproxy_rs/udp.pyi"
+    },
+    {
+      "bytes" : 42,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/mitmproxy_rs/wireguard.pyi",
+      "sha256" : "022897cf9c9c9fd43e87d3580dd546b15b5c434d4cc7f79fe4a1056a567a4d6c",
+      "target" : "../../Resources/mitmproxy_rs/wireguard.pyi"
+    },
+    {
+      "bytes" : 26,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/publicsuffix2",
+      "sha256" : "f18394c9bf04498072abdf9fb171f840fda9cc33e616453e7ce0ac2a425b3689",
+      "target" : "../Resources/publicsuffix2"
+    },
+    {
+      "bytes" : 940080,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/pylsqpack/_binding.abi3.so",
+      "sha256" : "d26dff3b141ff55703d76bde1aa7d66d77e2029a97497a04197ab9f4afb20c27"
+    },
+    {
+      "bytes" : 16,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/python3.14",
+      "sha256" : "711d6c5c4c4157992b802685476928a8b39f47fe14ba895f02e5680c10f4432a",
+      "target" : "python3__dot__14"
+    },
+    {
+      "bytes" : 120240,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_asyncio.cpython-314-darwin.so",
+      "sha256" : "fa4836c948a260274fd6d346306f1a4406fd3331586536f83fb242493ec26c72"
+    },
+    {
+      "bytes" : 71232,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_bisect.cpython-314-darwin.so",
+      "sha256" : "6bd5205ade499f6071bf442e245408d44522006d560dd20478b65694338e8f4f"
+    },
+    {
+      "bytes" : 90304,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_blake2.cpython-314-darwin.so",
+      "sha256" : "669085db4fb188094058636d9b719576379bb4b6fa8b2ae2c55c3b8ec33dd970"
+    },
+    {
+      "bytes" : 73232,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_bz2.cpython-314-darwin.so",
+      "sha256" : "1ccc2b0ff58ae3b9206f9c8fb5a0f60dbad0152e3eb6d4293614217aa9fceb6a"
+    },
+    {
+      "bytes" : 186400,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_codecs_cn.cpython-314-darwin.so",
+      "sha256" : "2e3cfb3eae2db5c0f392a28f70f27e1b2ca06c2f7fbb24173fda5d8f6c56a09c"
+    },
+    {
+      "bytes" : 203008,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_codecs_hk.cpython-314-darwin.so",
+      "sha256" : "c35b35823bce9cb7d75854b1f2e357250ab0e0cfa1ecc45d8255afa6f5a1e17e"
+    },
+    {
+      "bytes" : 72512,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_codecs_iso2022.cpython-314-darwin.so",
+      "sha256" : "2fac54ea5fb83d79ee9478bf0862f0ed45b96c41878f7cebeccb008c616cdb8c"
+    },
+    {
+      "bytes" : 302928,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_codecs_jp.cpython-314-darwin.so",
+      "sha256" : "8bba5f064d0c8b8eb17be46f476456b3a715e5af1cfd8b1ac45259c411a016ec"
+    },
+    {
+      "bytes" : 169968,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_codecs_kr.cpython-314-darwin.so",
+      "sha256" : "d0b4e084e792aadd459d374ea16604c987fb6454b8b45d28735c5d04860b8bc2"
+    },
+    {
+      "bytes" : 169472,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_codecs_tw.cpython-314-darwin.so",
+      "sha256" : "a2adc26e2cf7dcb85d8d7c82363547e89e4fa263092840f04177b2b8585c0914"
+    },
+    {
+      "bytes" : 91840,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_csv.cpython-314-darwin.so",
+      "sha256" : "d70bad8c9a601602e8428fa430927331121183897a4cf9d8d8eb22946ef7dc0f"
+    },
+    {
+      "bytes" : 180624,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_ctypes.cpython-314-darwin.so",
+      "sha256" : "d1d68256cf009b2efaa2926b8e3c9cc426df754bf1ff7cbd9bc866eb68138d0d"
+    },
+    {
+      "bytes" : 178720,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_curses.cpython-314-darwin.so",
+      "sha256" : "0586c782f99667badd97b0506ba4acb6625b5c26883b96082ed97cfdf25fffd3"
+    },
+    {
+      "bytes" : 212800,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_decimal.cpython-314-darwin.so",
+      "sha256" : "ce77835bffe25f34ff054f215fe269bb0eec248f036de30e7259badceab21655"
+    },
+    {
+      "bytes" : 98640,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_hashlib.cpython-314-darwin.so",
+      "sha256" : "422692bd42ebbceb84ad4252dd6d39ba706b8b21751afb497771800c7368be65"
+    },
+    {
+      "bytes" : 70416,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_heapq.cpython-314-darwin.so",
+      "sha256" : "44d7366f2edae3a42a84d09838d0dd0d9e758b0a8861e3bcbc27980fd4ccbc30"
+    },
+    {
+      "bytes" : 147136,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_hmac.cpython-314-darwin.so",
+      "sha256" : "eb6fe8aaf2084b2c16d803046499c7664792b950d173066c6233c4a8929a4e1b"
+    },
+    {
+      "bytes" : 75200,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_interpqueues.cpython-314-darwin.so",
+      "sha256" : "b12759e705809ca3ec8631a125f2bc135a5bd7ef17695a6a6b8c2209a83ba36a"
+    },
+    {
+      "bytes" : 95632,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_interpreters.cpython-314-darwin.so",
+      "sha256" : "ab806440def9b3534ad3ea569f7e81429473cc2b95ec6e1ea30967aa27a71bda"
+    },
+    {
+      "bytes" : 91088,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_json.cpython-314-darwin.so",
+      "sha256" : "d9d12e325ddcce53d4d7cfb9ff9bd4df641cc9d7c82c4fc0f0fab36a69f392d6"
+    },
+    {
+      "bytes" : 92800,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_lzma.cpython-314-darwin.so",
+      "sha256" : "f70b51dd3b964e27ac65233487ac25c9914eb04427230abce7d056b24a423a0c"
+    },
+    {
+      "bytes" : 72000,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_md5.cpython-314-darwin.so",
+      "sha256" : "e4be0fe0287503c852e93dddeae51550b65e49479205b0f0a21181cc0c9b02cc"
+    },
+    {
+      "bytes" : 96864,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_multibytecodec.cpython-314-darwin.so",
+      "sha256" : "6593ac8d084b613008317ad0d69c7760324680406c4ccabc58c5794b0230dd51"
+    },
+    {
+      "bytes" : 74112,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_multiprocessing.cpython-314-darwin.so",
+      "sha256" : "a1ee087c080347d0d8b36c773e93f0da286c36e0ac9217dfb137fece081eee2b"
+    },
+    {
+      "bytes" : 170208,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_pickle.cpython-314-darwin.so",
+      "sha256" : "27832c4dc9e62d2f6478fc20b9e74b7c4c5fdaf24634897fda2fd2f07054e50a"
+    },
+    {
+      "bytes" : 69936,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_posixshmem.cpython-314-darwin.so",
+      "sha256" : "77bdc69ea96431a39a6694bd6855708289749d013ad30aadf866d9a469c751bc"
+    },
+    {
+      "bytes" : 72976,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_posixsubprocess.cpython-314-darwin.so",
+      "sha256" : "eb54307fdec9729cfbe870fa1ce2a29fd6513bd0a0fe57448b36db29b2f0b85d"
+    },
+    {
+      "bytes" : 72384,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_queue.cpython-314-darwin.so",
+      "sha256" : "9d5c45ac7fd36066168623240d338de687020ac7b3979ee0fc6bd9bd09dcee74"
+    },
+    {
+      "bytes" : 72144,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_random.cpython-314-darwin.so",
+      "sha256" : "98523625a38afcfe32f50dccdf9fb686df2e9007bb747388d5628cb4f2dabbba"
+    },
+    {
+      "bytes" : 71536,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_scproxy.cpython-314-darwin.so",
+      "sha256" : "76fc843f29b74b7941dc36a0dd61fb3a9cc172d527e78f88ae428484e8800185"
+    },
+    {
+      "bytes" : 71984,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_sha1.cpython-314-darwin.so",
+      "sha256" : "e27c8db436b72f7852379bb73150494ebbeadf06773ab7f30955a35744aeb81c"
+    },
+    {
+      "bytes" : 90032,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_sha2.cpython-314-darwin.so",
+      "sha256" : "1f284f1c2f14b8d5566f14f2eca66893ca8af41912cef91ad852fd709511e0ad"
+    },
+    {
+      "bytes" : 74064,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_sha3.cpython-314-darwin.so",
+      "sha256" : "4d626c56ba3d2190b32575af5e44d9f6e5bf281b1c6defcd34dc017f7d7591ae"
+    },
+    {
+      "bytes" : 134016,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_socket.cpython-314-darwin.so",
+      "sha256" : "e60164f88816a675c3fc916efc36c3bcf9d6c204b1d0f448032521455fc08fcc"
+    },
+    {
+      "bytes" : 223488,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_ssl.cpython-314-darwin.so",
+      "sha256" : "3ca00f88d6945ee2d0e511ffde1346b7b9d9e41cfa6857ca363cb5c26998f12b"
+    },
+    {
+      "bytes" : 69008,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_statistics.cpython-314-darwin.so",
+      "sha256" : "9095139f2fede9f4609f74e0b4d286d3795ef9acdadfe40979f847f9f3569c59"
+    },
+    {
+      "bytes" : 96000,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_struct.cpython-314-darwin.so",
+      "sha256" : "c1e22a904ea57468600f12ada2094484c52b541187a8689b19fd658c51238083"
+    },
+    {
+      "bytes" : 68816,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_uuid.cpython-314-darwin.so",
+      "sha256" : "4b7dec58046b8a796eadf3f1a86e8de2f2f9bc73e6f3aa9762524993d74e8b5d"
+    },
+    {
+      "bytes" : 114928,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/_zstd.cpython-314-darwin.so",
+      "sha256" : "08b55c8888331c3d2c1b2d4b9c7e20581ec76ed0712bcbc136f6f3ec2ff5fd93"
+    },
+    {
+      "bytes" : 114608,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/array.cpython-314-darwin.so",
+      "sha256" : "f25f9518c3383bd01919c0e4553c91cfef14f2ac36edfd989fa948e33b5afb0b"
+    },
+    {
+      "bytes" : 72608,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/binascii.cpython-314-darwin.so",
+      "sha256" : "014d2d0719ec9ab3d8a8d5d9c558d27609963c450de9b62a5f938e719c82d870"
+    },
+    {
+      "bytes" : 71296,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/fcntl.cpython-314-darwin.so",
+      "sha256" : "fbef994655ffe821235b52fea1eaf4a020fb9862235150233aaf813f4f513a2b"
+    },
+    {
+      "bytes" : 71248,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/grp.cpython-314-darwin.so",
+      "sha256" : "c7634068ef1337836411a28033b68ebf82d2b5e87ac7c552c48de50dcc681b03"
+    },
+    {
+      "bytes" : 111616,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/math.cpython-314-darwin.so",
+      "sha256" : "3ed984a893b44575c7cb11c3ca6459303733effbe9bb915d578bba3b9f77c9bc"
+    },
+    {
+      "bytes" : 91440,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/mmap.cpython-314-darwin.so",
+      "sha256" : "c835e2bce8f4a686fcefc57d2084b68fd16ec99319f0b287cd9731bf22abf6b5"
+    },
+    {
+      "bytes" : 100384,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/pyexpat.cpython-314-darwin.so",
+      "sha256" : "bb76f7032e81fb164b2360b928324101fb730ca027ad321414de825342aaae91"
+    },
+    {
+      "bytes" : 95456,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/readline.cpython-314-darwin.so",
+      "sha256" : "19e2e9a712081c65caaf4007d88831898f3ff1ab973b2474bcb433ba8a711a10"
+    },
+    {
+      "bytes" : 71504,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/resource.cpython-314-darwin.so",
+      "sha256" : "f015362ad2cadd9a9e035e43abfbaa3b95eb61878e15ce6e27b0b42c2af41e98"
+    },
+    {
+      "bytes" : 93184,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/select.cpython-314-darwin.so",
+      "sha256" : "50277c465038893ecc71fe541ce8e05e759c39ffff140d6479615a11e417bdd7"
+    },
+    {
+      "bytes" : 70832,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/syslog.cpython-314-darwin.so",
+      "sha256" : "a523608de815664e3e8d4ab367a891992618477b135a5ccbeb6f847e7dc39861"
+    },
+    {
+      "bytes" : 72464,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/termios.cpython-314-darwin.so",
+      "sha256" : "0675665a8770fac3d2e9cad3e648cbf0948b262993b735e9e24e9822e956547a"
+    },
+    {
+      "bytes" : 801840,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/unicodedata.cpython-314-darwin.so",
+      "sha256" : "ff782f68caf436f8255eebd2874a0100318db613ba414104f0b4908726e6a003"
+    },
+    {
+      "bytes" : 94352,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/python3__dot__14/lib-dynload/zlib.cpython-314-darwin.so",
+      "sha256" : "3f3db1735a959a1f2ea19e20966b19278522682d5599e1fe0bb1679abbf737da"
+    },
+    {
+      "bytes" : 46,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/service_identity-24.2.0.dist-info",
+      "sha256" : "77a53bee571965486a9169433f3e159b7687c9001e5a42829ac24ac7a3e7cf03",
+      "target" : "../Resources/service_identity-24.2.0.dist-info"
+    },
+    {
+      "bytes" : 23,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/setuptools",
+      "sha256" : "50ab33bb5b46469a06ec88170f5ace5ec3ec7b48a134749e0501140a8dbbb4f9",
+      "target" : "../Resources/setuptools"
+    },
+    {
+      "bytes" : 69088,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/tornado/speedups.abi3.so",
+      "sha256" : "5466e25ad6397f1d70d1a5801d67f61da2acb7b864ca8021a207bf46b878ebf6"
+    },
+    {
+      "bytes" : 20,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/wcwidth",
+      "sha256" : "da8f99e0389185cdc1bd897406b4329efa78711888ce36eb960c0732c677f852",
+      "target" : "../Resources/wcwidth"
+    },
+    {
+      "bytes" : 37,
+      "kind" : "symlink",
+      "path" : "Contents/Frameworks/werkzeug-3.1.5.dist-info",
+      "sha256" : "206b0c9bad47abbeb9a680f7519c726a8efe86ce6465f7446106b5da2acccb43",
+      "target" : "../Resources/werkzeug-3.1.5.dist-info"
+    },
+    {
+      "bytes" : 903056,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/zstandard/_cffi.cpython-314-darwin.so",
+      "sha256" : "504f39174e280c5a851c5d31bac2acaef6674f2dda7e1e8e3b7fc5b13d160c04"
+    },
+    {
+      "bytes" : 779824,
+      "kind" : "file",
+      "path" : "Contents/Frameworks/zstandard/backend_c.cpython-314-darwin.so",
+      "sha256" : "7c3b3a5a3f6ceb510cea88edde88f905ba8340574ed85f7c1770f554ac2295d7"
+    },
+    {
+      "bytes" : 709,
+      "kind" : "file",
+      "path" : "Contents/Info.plist",
+      "sha256" : "9df717c479b6df56326efc522c79a21f805db69b24c44243c5532b62adce8617"
+    },
+    {
+      "bytes" : 87,
+      "kind" : "file",
+      "path" : "Contents/MacOS/.mitmproxy-wrapper",
+      "sha256" : "08d65a99949da7aeae6bc9eb977ea53c19bdf359ecccf4718fa92739de9cf92f"
+    },
+    {
+      "bytes" : 10793312,
+      "kind" : "file",
+      "path" : "Contents/MacOS/mitmdump",
+      "sha256" : "ed2dc3ae2f1cb77b415e2083bffd20261c12421550cac02a1030de2e3e6e52f4"
+    },
+    {
+      "bytes" : 10793312,
+      "kind" : "file",
+      "path" : "Contents/MacOS/mitmproxy",
+      "sha256" : "1864aef33ef2de8df7603fcb5d5483f2bc41677f0f148838fedaea559163bf9e"
+    },
+    {
+      "bytes" : 10793312,
+      "kind" : "file",
+      "path" : "Contents/MacOS/mitmweb",
+      "sha256" : "9d809ab66ad4e4842c7743d47ee9bc7da61bfcf04be20ea598ee5fc11e9105cf"
+    },
+    {
+      "bytes" : 37,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/Python",
+      "sha256" : "cf06376aa3770c0628ba018161cc23ae796a1b44f16c0c549253235554261385",
+      "target" : "Python.framework/Versions/3.14/Python"
+    },
+    {
+      "bytes" : 30,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/Python.framework",
+      "sha256" : "1899388a37426f58a72aa3fcf207a9e1201901c51820287163d9dc590b3c94db",
+      "target" : "../Frameworks/Python.framework"
+    },
+    {
+      "bytes" : 35,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/_argon2_cffi_bindings",
+      "sha256" : "1ed4d13db69ff39dc032dc19e7bc74c8b2a047186aa09d7e11106acd2f6bc072",
+      "target" : "../Frameworks/_argon2_cffi_bindings"
+    },
+    {
+      "bytes" : 43,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/_brotli.cpython-314-darwin.so",
+      "sha256" : "9dec2583038dd84e93faa790c893571ccae06520b35443128b7b8ef302591c06",
+      "target" : "../Frameworks/_brotli.cpython-314-darwin.so"
+    },
+    {
+      "bytes" : 49,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/_cffi_backend.cpython-314-darwin.so",
+      "sha256" : "7025467401251ecd974cb33c89db1cc0956a00455f4266cfdf3d12186c41251f",
+      "target" : "../Frameworks/_cffi_backend.cpython-314-darwin.so"
+    },
+    {
+      "bytes" : 21,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/aioquic",
+      "sha256" : "99f300ed627d98937c1b1e327e9a4fdfa3484753f84ee21b7f0651e66384c697",
+      "target" : "../Frameworks/aioquic"
+    },
+    {
+      "bytes" : 2,
+      "kind" : "file",
+      "path" : "Contents/Resources/argon2_cffi-25.1.0.dist-info/INSTALLER",
+      "sha256" : "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+    },
+    {
+      "bytes" : 4119,
+      "kind" : "file",
+      "path" : "Contents/Resources/argon2_cffi-25.1.0.dist-info/METADATA",
+      "sha256" : "e90851075b68261faccf407b29430f45e6a5b1a0759a0d50b8d93101b0de2179"
+    },
+    {
+      "bytes" : 1184,
+      "kind" : "file",
+      "path" : "Contents/Resources/argon2_cffi-25.1.0.dist-info/RECORD",
+      "sha256" : "8377684d785a60355da086bcb4443a473dde7b79ad81f17133580c20dc018c4b"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/argon2_cffi-25.1.0.dist-info/REQUESTED",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 87,
+      "kind" : "file",
+      "path" : "Contents/Resources/argon2_cffi-25.1.0.dist-info/WHEEL",
+      "sha256" : "aad0b0a12256807936d52d4a6f88a1773236ae527564a688bab4e3fe780e8724"
+    },
+    {
+      "bytes" : 1115,
+      "kind" : "file",
+      "path" : "Contents/Resources/argon2_cffi-25.1.0.dist-info/licenses/LICENSE",
+      "sha256" : "b6944d386e87ccf49d9632da083685a4b7624733e686a7fe283dd2d428341d77"
+    },
+    {
+      "bytes" : 2,
+      "kind" : "file",
+      "path" : "Contents/Resources/attrs-25.4.0.dist-info/INSTALLER",
+      "sha256" : "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+    },
+    {
+      "bytes" : 10473,
+      "kind" : "file",
+      "path" : "Contents/Resources/attrs-25.4.0.dist-info/METADATA",
+      "sha256" : "d917abc63eda81c311c62c1d92dea50b682ea870269062821f5de75962bb6684"
+    },
+    {
+      "bytes" : 2743,
+      "kind" : "file",
+      "path" : "Contents/Resources/attrs-25.4.0.dist-info/RECORD",
+      "sha256" : "5536b0b121383d1f21ba1a69874bb6a00f48b2c9b32ce8f5e3db3b6f0643a73d"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/attrs-25.4.0.dist-info/REQUESTED",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 87,
+      "kind" : "file",
+      "path" : "Contents/Resources/attrs-25.4.0.dist-info/WHEEL",
+      "sha256" : "aad0b0a12256807936d52d4a6f88a1773236ae527564a688bab4e3fe780e8724"
+    },
+    {
+      "bytes" : 1109,
+      "kind" : "file",
+      "path" : "Contents/Resources/attrs-25.4.0.dist-info/licenses/LICENSE",
+      "sha256" : "882115c95dfc2af1eeb6714f8ec6d5cbcabf667caff8729f42420da63f714e9f"
+    },
+    {
+      "bytes" : 1387972,
+      "kind" : "file",
+      "path" : "Contents/Resources/base_library.zip",
+      "sha256" : "7fdfc4fc7f2357711aeb1ce959722654880ffeab8c9ae08272208477e9bb249d"
+    },
+    {
+      "bytes" : 20,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/bcrypt",
+      "sha256" : "6c3ecfd7d09797641490aac531a97873207768104bd111c2c573536454e0fb32",
+      "target" : "../Frameworks/bcrypt"
+    },
+    {
+      "bytes" : 270954,
+      "kind" : "file",
+      "path" : "Contents/Resources/certifi/cacert.pem",
+      "sha256" : "4f3975ff30abbf35443b486064ae8bcb41dff707ffdf576c76d292fb458aa0a9"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/certifi/py.typed",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 32,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/charset_normalizer",
+      "sha256" : "5fb7fffea11d8633965d79e0e463191261c5c0d02e3ec94a691551e710fa0db5",
+      "target" : "../Frameworks/charset_normalizer"
+    },
+    {
+      "bytes" : 2,
+      "kind" : "file",
+      "path" : "Contents/Resources/click-8.3.1.dist-info/INSTALLER",
+      "sha256" : "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+    },
+    {
+      "bytes" : 2621,
+      "kind" : "file",
+      "path" : "Contents/Resources/click-8.3.1.dist-info/METADATA",
+      "sha256" : "5d9781acc004d2085313cf128dfad20ee4b2342a413e9971251d6d6f00fda198"
+    },
+    {
+      "bytes" : 1808,
+      "kind" : "file",
+      "path" : "Contents/Resources/click-8.3.1.dist-info/RECORD",
+      "sha256" : "dff6b00633c0a5e3c58114a465b95b8f570cdabe98e59d713b53d700066bbf41"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/click-8.3.1.dist-info/REQUESTED",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 82,
+      "kind" : "file",
+      "path" : "Contents/Resources/click-8.3.1.dist-info/WHEEL",
+      "sha256" : "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db"
+    },
+    {
+      "bytes" : 1475,
+      "kind" : "file",
+      "path" : "Contents/Resources/click-8.3.1.dist-info/licenses/LICENSE.txt",
+      "sha256" : "9a8ad106a394e853bfe21f42f4e72d592819a22805d991b5f3275029292b658d"
+    },
+    {
+      "bytes" : 26,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/cryptography",
+      "sha256" : "167bd617ea69f4521986d70dfc68d29e7d9d4934004a118273c5a6370200683e",
+      "target" : "../Frameworks/cryptography"
+    },
+    {
+      "bytes" : 2,
+      "kind" : "file",
+      "path" : "Contents/Resources/cryptography-46.0.4.dist-info/INSTALLER",
+      "sha256" : "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+    },
+    {
+      "bytes" : 5748,
+      "kind" : "file",
+      "path" : "Contents/Resources/cryptography-46.0.4.dist-info/METADATA",
+      "sha256" : "23772263d659f0d86ba11a8de47e7e437df320dc4c531054aec18097f35cfc62"
+    },
+    {
+      "bytes" : 10917,
+      "kind" : "file",
+      "path" : "Contents/Resources/cryptography-46.0.4.dist-info/RECORD",
+      "sha256" : "3d2a9a028f8a82967418f8f2199adcd049ad700a65396e99d1b971f3d8c6721e"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/cryptography-46.0.4.dist-info/REQUESTED",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 108,
+      "kind" : "file",
+      "path" : "Contents/Resources/cryptography-46.0.4.dist-info/WHEEL",
+      "sha256" : "bc3c971b001efd0069630fa30fc794f846e33234045c7cd4643a22a2c7adc512"
+    },
+    {
+      "bytes" : 197,
+      "kind" : "file",
+      "path" : "Contents/Resources/cryptography-46.0.4.dist-info/licenses/LICENSE",
+      "sha256" : "3e0c7c091a948b82533ba98fd7cbb40432d6f1a9acbf85f5922d2f99a93ae6bb"
+    },
+    {
+      "bytes" : 11360,
+      "kind" : "file",
+      "path" : "Contents/Resources/cryptography-46.0.4.dist-info/licenses/LICENSE.APACHE",
+      "sha256" : "aac73b3148f6d1d7111dbca32099f68d26c644c6813ae1e4f05f6579aa2663fe"
+    },
+    {
+      "bytes" : 1532,
+      "kind" : "file",
+      "path" : "Contents/Resources/cryptography-46.0.4.dist-info/licenses/LICENSE.BSD",
+      "sha256" : "602c4c7482de6479dd2e9793cda275e5e63d773dacd1eca689232ab7008fb4fb"
+    },
+    {
+      "bytes" : 2,
+      "kind" : "file",
+      "path" : "Contents/Resources/flask-3.1.2.dist-info/INSTALLER",
+      "sha256" : "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+    },
+    {
+      "bytes" : 3167,
+      "kind" : "file",
+      "path" : "Contents/Resources/flask-3.1.2.dist-info/METADATA",
+      "sha256" : "a1183adc300021ca0b02bee4cd380810a7e6f3fe07313469996988a6d758fe3b"
+    },
+    {
+      "bytes" : 2574,
+      "kind" : "file",
+      "path" : "Contents/Resources/flask-3.1.2.dist-info/RECORD",
+      "sha256" : "1fe24136354356b7f76658d3f5188b3a58a56d00d2a7a68b6729d9b2f5d58bf0"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/flask-3.1.2.dist-info/REQUESTED",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 82,
+      "kind" : "file",
+      "path" : "Contents/Resources/flask-3.1.2.dist-info/WHEEL",
+      "sha256" : "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db"
+    },
+    {
+      "bytes" : 40,
+      "kind" : "file",
+      "path" : "Contents/Resources/flask-3.1.2.dist-info/entry_points.txt",
+      "sha256" : "6c13fb853392e5fcfdccbb42eec3e87c164094c904bc1c6eecaa92ea5e65bdce"
+    },
+    {
+      "bytes" : 1475,
+      "kind" : "file",
+      "path" : "Contents/Resources/flask-3.1.2.dist-info/licenses/LICENSE.txt",
+      "sha256" : "489a8e1108509ed98a37bb983e11e0f7e1d31f0bd8f99a79c8448e7ff37d07ea"
+    },
+    {
+      "bytes" : 2,
+      "kind" : "file",
+      "path" : "Contents/Resources/h2-4.3.0.dist-info/INSTALLER",
+      "sha256" : "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+    },
+    {
+      "bytes" : 5139,
+      "kind" : "file",
+      "path" : "Contents/Resources/h2-4.3.0.dist-info/METADATA",
+      "sha256" : "b2f47f8201491420642c229e5fcbcbd5576c7afd023264dcb59b5eb22dcbb265"
+    },
+    {
+      "bytes" : 1383,
+      "kind" : "file",
+      "path" : "Contents/Resources/h2-4.3.0.dist-info/RECORD",
+      "sha256" : "0eb83d58050e02212dc0f58042c3e7df1a4d00249126139ca2ba56c12e7ccca4"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/h2-4.3.0.dist-info/REQUESTED",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 91,
+      "kind" : "file",
+      "path" : "Contents/Resources/h2-4.3.0.dist-info/WHEEL",
+      "sha256" : "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b"
+    },
+    {
+      "bytes" : 1102,
+      "kind" : "file",
+      "path" : "Contents/Resources/h2-4.3.0.dist-info/licenses/LICENSE",
+      "sha256" : "7a65a5af0cbabf1c16251c7c6b2b7cb46d16a7222e79975b9b61fcd66a2e3f28"
+    },
+    {
+      "bytes" : 3,
+      "kind" : "file",
+      "path" : "Contents/Resources/h2-4.3.0.dist-info/top_level.txt",
+      "sha256" : "1e2ba5c7c2b12368c550cd5d1bbf8265e4643b78f9d0c07008b1b7e95aeafa42"
+    },
+    {
+      "bytes" : 716278,
+      "kind" : "file",
+      "path" : "Contents/Resources/icon.icns",
+      "sha256" : "7dfae06c69feb5524a70ec6f4106656e9074711c0ea6bbcf6d8869d3bc50e374"
+    },
+    {
+      "bytes" : 2,
+      "kind" : "file",
+      "path" : "Contents/Resources/itsdangerous-2.2.0.dist-info/INSTALLER",
+      "sha256" : "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+    },
+    {
+      "bytes" : 1475,
+      "kind" : "file",
+      "path" : "Contents/Resources/itsdangerous-2.2.0.dist-info/LICENSE.txt",
+      "sha256" : "63af09891b6be8ad1a4252ed43af0f4efba7fc948e228367bed7f3c5ae0b09d7"
+    },
+    {
+      "bytes" : 1924,
+      "kind" : "file",
+      "path" : "Contents/Resources/itsdangerous-2.2.0.dist-info/METADATA",
+      "sha256" : "d2b934fb56708a1b94e439f0255c0f5a8108e3258ec827b18a1dc9c991db9611"
+    },
+    {
+      "bytes" : 1214,
+      "kind" : "file",
+      "path" : "Contents/Resources/itsdangerous-2.2.0.dist-info/RECORD",
+      "sha256" : "80583f52df848dbd699dbf2c9b8ed9bb3cc5c1fa81ca5c737b97563feeab729d"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/itsdangerous-2.2.0.dist-info/REQUESTED",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 81,
+      "kind" : "file",
+      "path" : "Contents/Resources/itsdangerous-2.2.0.dist-info/WHEEL",
+      "sha256" : "1196c6921ec87b83e865f450f08d19b8ff5592537f4ef719e83484e546abe33e"
+    },
+    {
+      "bytes" : 31,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/libcrypto.3.dylib",
+      "sha256" : "65b475c0236405448b362e73c60566d66beb66f8251506527f4971516da2b9be",
+      "target" : "../Frameworks/libcrypto.3.dylib"
+    },
+    {
+      "bytes" : 29,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/liblzma.5.dylib",
+      "sha256" : "773d9c53790db47378d367a0813753164baf230ef135c7a73cb476247113712c",
+      "target" : "../Frameworks/liblzma.5.dylib"
+    },
+    {
+      "bytes" : 30,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/libmpdec.4.dylib",
+      "sha256" : "5c28ef828966d017377069a259933a37758d505a9b5b19239f13160baf83b2b5",
+      "target" : "../Frameworks/libmpdec.4.dylib"
+    },
+    {
+      "bytes" : 28,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/libssl.3.dylib",
+      "sha256" : "169b043d72763e9e2d3f3b77d6775445e78be49d116a76554899228d5acd30ac",
+      "target" : "../Frameworks/libssl.3.dylib"
+    },
+    {
+      "bytes" : 29,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/libzstd.1.dylib",
+      "sha256" : "2e37208582386c89365b973b8dbd7764a535f70d642efaab03a571d9422f0b5a",
+      "target" : "../Frameworks/libzstd.1.dylib"
+    },
+    {
+      "bytes" : 24,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/markupsafe",
+      "sha256" : "c7a7106171829e9900b4cb0fd98209fc9897dca920416a61f068724619c47b4c",
+      "target" : "../Frameworks/markupsafe"
+    },
+    {
+      "bytes" : 2,
+      "kind" : "file",
+      "path" : "Contents/Resources/markupsafe-3.0.3.dist-info/INSTALLER",
+      "sha256" : "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+    },
+    {
+      "bytes" : 2690,
+      "kind" : "file",
+      "path" : "Contents/Resources/markupsafe-3.0.3.dist-info/METADATA",
+      "sha256" : "12b4cc61a7fa288cf7667ee3f213786d9619db57fb33ff6f934afbcb5c12ec81"
+    },
+    {
+      "bytes" : 1083,
+      "kind" : "file",
+      "path" : "Contents/Resources/markupsafe-3.0.3.dist-info/RECORD",
+      "sha256" : "5a135bbc4ba80be6185554a35c1393e3db1a48f817e76e3566febb8b8cee3c78"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/markupsafe-3.0.3.dist-info/REQUESTED",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 136,
+      "kind" : "file",
+      "path" : "Contents/Resources/markupsafe-3.0.3.dist-info/WHEEL",
+      "sha256" : "d8877aaab79eb79b78c19bf9f1b65f8a3279f2aadcdb1930e8e56f59f7aac55d"
+    },
+    {
+      "bytes" : 1475,
+      "kind" : "file",
+      "path" : "Contents/Resources/markupsafe-3.0.3.dist-info/licenses/LICENSE.txt",
+      "sha256" : "489a8e1108509ed98a37bb983e11e0f7e1d31f0bd8f99a79c8448e7ff37d07ea"
+    },
+    {
+      "bytes" : 11,
+      "kind" : "file",
+      "path" : "Contents/Resources/markupsafe-3.0.3.dist-info/top_level.txt",
+      "sha256" : "ab2d0f9637b9209bafb020637a32728430a310075c0cb2bfd9a81571ec7c67a5"
+    },
+    {
+      "bytes" : 160257,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/addons/onboardingapp/static/bootstrap.min.css",
+      "sha256" : "7ba7f6b94246d8a609919f613d8193727b6a1fdc4f8ccf28ff60604841dde059"
+    },
+    {
+      "bytes" : 5430,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/addons/onboardingapp/static/images/favicon.ico",
+      "sha256" : "7a7408486f94d0dca411207e739adc71277227cbe5cbdc5aed70cdc4c4d4f76c"
+    },
+    {
+      "bytes" : 123829,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/addons/onboardingapp/static/images/mitmproxy-long.png",
+      "sha256" : "2e69ebe0dca5914b03e9b2eb4026c753c70f5d4c25f41d9fffd332b2715d4144"
+    },
+    {
+      "bytes" : 640,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/addons/onboardingapp/static/mitmproxy.css",
+      "sha256" : "77c57f13a91ceee7efd984b4819e69217e059cf701688e386b2b0eb6f6347268"
+    },
+    {
+      "bytes" : 535,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/addons/onboardingapp/templates/icons/android-brands.svg",
+      "sha256" : "26cc15d54a692ec6f5038d955c49b3c768b5b1b2cb80aa9270db183bad5f60d7"
+    },
+    {
+      "bytes" : 665,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/addons/onboardingapp/templates/icons/apple-brands.svg",
+      "sha256" : "f3b22c7417dd2feaebb1d805fcc3e7e474758effa2a4fa398395de9b9256ad3a"
+    },
+    {
+      "bytes" : 1073,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/addons/onboardingapp/templates/icons/certificate-solid.svg",
+      "sha256" : "6e2f2e5b88bd4aea63535dee069222f9668f77e56ec7b34eb8812a21b2dcf436"
+    },
+    {
+      "bytes" : 1850,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/addons/onboardingapp/templates/icons/firefox-browser-brands.svg",
+      "sha256" : "692ce31aeab7848eb621c407fcc2f88f82867043487edef282ae51e17ce646dd"
+    },
+    {
+      "bytes" : 3718,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/addons/onboardingapp/templates/icons/linux-brands.svg",
+      "sha256" : "0fae278aed3ac8eba446d183ae42c8343ec47e468e9a11b7db871ed51fddcb98"
+    },
+    {
+      "bytes" : 369,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/addons/onboardingapp/templates/icons/windows-brands.svg",
+      "sha256" : "23a8161f7c27a7d4d9552f13ee0f4301a753f79d9e29a090d72139118ef96379"
+    },
+    {
+      "bytes" : 6569,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/addons/onboardingapp/templates/index.html",
+      "sha256" : "83e74e9f387eb3f94ede28b2703f203a29a4d15f9b1b01466994d3063b34a4b4"
+    },
+    {
+      "bytes" : 801,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/addons/onboardingapp/templates/layout.html",
+      "sha256" : "c4375fae3cebd407cd3e7cf294bc79445377cb7c17f4b59b1b67bcc43b39c567"
+    },
+    {
+      "bytes" : 659,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/tools/web/index.html",
+      "sha256" : "6d18f93cf850ee47010043248aa07645c5afb8e43f0b2949db490dd24054a540"
+    },
+    {
+      "bytes" : 365133,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/tools/web/static/favicon.ico",
+      "sha256" : "93f546d6bee5a1ce7d5fb5adb4926c6e698be6746c2a699342d22f62c3107568"
+    },
+    {
+      "bytes" : 77160,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/tools/web/static/fontawesome-webfont-B-jkhYfk.woff2",
+      "sha256" : "2adefcbc041e7d18fcf2d417879dc5a09997aa64d675b7a3c4b6ce33da13f3fe"
+    },
+    {
+      "bytes" : 98024,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/tools/web/static/fontawesome-webfont-CDK5bt4p.woff",
+      "sha256" : "ba0c59deb5450f5cb41b3f93609ee2d0d995415877ddfa223e8a8a7533474f07"
+    },
+    {
+      "bytes" : 165548,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/tools/web/static/fontawesome-webfont-CQDK8MU3.ttf",
+      "sha256" : "aa58f33f239a0fb02f5c7a6c45c043d7a9ac9a093335806694ecd6d4edc0d6a8"
+    },
+    {
+      "bytes" : 444379,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/tools/web/static/fontawesome-webfont-D13rzr4g.svg",
+      "sha256" : "ad6157926c1622ba4e1d03d478f1541368524bfc46f51e42fe0d945f7ef323e4"
+    },
+    {
+      "bytes" : 165742,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/tools/web/static/fontawesome-webfont-G5YE5S7X.eot",
+      "sha256" : "7bfcab6db99d5cfbf1705ca0536ddc78585432cc5fa41bbd7ad0f009033b2979"
+    },
+    {
+      "bytes" : 174407,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/tools/web/static/index-Be7e-cwP.js",
+      "sha256" : "bbc076cf60ad1cc705a1f7727475d6324ca0944acd88e035252fedfc8f806aed"
+    },
+    {
+      "bytes" : 37465,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/tools/web/static/index-DhPPoJ7G.css",
+      "sha256" : "ae37b2e4f0f4f44532965b0be07007949b2830cb5f6b6a365e6abf1b67297c14"
+    },
+    {
+      "bytes" : 899342,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/tools/web/static/vendor-BS4xPthR.js",
+      "sha256" : "26978df63554c7192de07bcd53fc1d0a8a4ccf3944541bcef182e8409d9a422f"
+    },
+    {
+      "bytes" : 136646,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/tools/web/static/vendor-Cg3S-P9H.css",
+      "sha256" : "73e63a2626f82970d7d87b8480210973eec52c24d9f4079415f031022dcea735"
+    },
+    {
+      "bytes" : 1016,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy/tools/web/templates/login.html",
+      "sha256" : "00c4ee51a3e3b9f80a4fc18c714feaeef5fc1025ae7352f3b9049736833a0db0"
+    },
+    {
+      "bytes" : 5937664,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_macos/Mitmproxy Redirector.app.tar",
+      "sha256" : "6446defaa224e65d48ae5542fadec0b366692e7fb8bc955c74a3444bbb63eb62"
+    },
+    {
+      "bytes" : 957,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_macos/macos-certificate-truster.app/Contents/Info.plist",
+      "sha256" : "c4cb78bfd7ef5e6bbae8212555b90fbc21ddea76348d3d1959509199df60f230"
+    },
+    {
+      "bytes" : 154566,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_macos/macos-certificate-truster.app/Contents/Resources/mitmproxy.icns",
+      "sha256" : "139ad2228ab7a6b5c53a4826b75182d7d68bc37e8d5a390867849f3821bf22c8"
+    },
+    {
+      "bytes" : 1969,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_rs/__init__.pyi",
+      "sha256" : "0c563b9dfb554f0294c0a24a0ff61026f8f21a72323f330b551a993de438b7f6"
+    },
+    {
+      "bytes" : 153,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_rs/certs.pyi",
+      "sha256" : "44258aa3de6c9a62dbb6c9c167097406f64e57df12c8a81caf09899dd3b29fb5"
+    },
+    {
+      "bytes" : 819,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_rs/contentviews.pyi",
+      "sha256" : "86c2c660ff8db106ecaded2aae15fd9201771f86347ce863fa50d56b98c354ba"
+    },
+    {
+      "bytes" : 501,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_rs/dns.pyi",
+      "sha256" : "7e3fe0e0465c5197d60df0cac2a602aca239ca3036bdc7356228c8c1903ef94f"
+    },
+    {
+      "bytes" : 669,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_rs/local.pyi",
+      "sha256" : "0601d52e0c30445abd1710a1de16f4e412300e883504b9faad0824104bf685fb"
+    },
+    {
+      "bytes" : 50,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/mitmproxy_rs/mitmproxy_rs.abi3.so",
+      "sha256" : "d3e42dcac7cf11a78ffbfdfaceb1a9fcbdf6f8fe1fbfec23e5bb5befb205e5a5",
+      "target" : "../../Frameworks/mitmproxy_rs/mitmproxy_rs.abi3.so"
+    },
+    {
+      "bytes" : 494,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_rs/process_info.pyi",
+      "sha256" : "afa35d6ab5c98cff3339523936e299fe825cc65ff3dc8f8fdf683bd8c8b747c1"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_rs/py.typed",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 333,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_rs/syntax_highlight.pyi",
+      "sha256" : "d496654194fe7b9c29a26fa9d7bec053f77b407d1a69cf02c27df816f560f2d1"
+    },
+    {
+      "bytes" : 643,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_rs/tun.pyi",
+      "sha256" : "58dd05524c95876fac8944527980d4c4e8daf3c47588f9423414d1af50c1ad25"
+    },
+    {
+      "bytes" : 672,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_rs/udp.pyi",
+      "sha256" : "1a811a4b23ee7791ad9d321b880a79d9d07ec8885273950f3a0d3ff055d5d503"
+    },
+    {
+      "bytes" : 751,
+      "kind" : "file",
+      "path" : "Contents/Resources/mitmproxy_rs/wireguard.pyi",
+      "sha256" : "afc4e80915dba5a3fa927577f53f94fd85240194934baec23d70d5f2baea9a0d"
+    },
+    {
+      "bytes" : 16934,
+      "kind" : "file",
+      "path" : "Contents/Resources/publicsuffix2/mpl-2.0.LICENSE",
+      "sha256" : "b2462e602b8aba362f2feb5e523e5b3eb58d3a66b9f92b73eba528827773fbf0"
+    },
+    {
+      "bytes" : 309,
+      "kind" : "file",
+      "path" : "Contents/Resources/publicsuffix2/public_suffix_list.ABOUT",
+      "sha256" : "a43bb92893ae8f9470993550571b9e2005b7a66bc73d0d381b529bd027c2e131"
+    },
+    {
+      "bytes" : 218101,
+      "kind" : "file",
+      "path" : "Contents/Resources/publicsuffix2/public_suffix_list.dat",
+      "sha256" : "76e4a8d1e76dae8db6da3829024108c02203c4e4b5a4301b5717564b05c7966d"
+    },
+    {
+      "bytes" : 23,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/pylsqpack",
+      "sha256" : "7856fc6c606fc382a9872a5e783e0bc0b394670de0f8e06cdd2950adb318467e",
+      "target" : "../Frameworks/pylsqpack"
+    },
+    {
+      "bytes" : 24,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/python3.14",
+      "sha256" : "038b720ab9ef7243e32e68f397fc2dbc99a2b96034eb623eb562d8b23af33796",
+      "target" : "../Frameworks/python3.14"
+    },
+    {
+      "bytes" : 2,
+      "kind" : "file",
+      "path" : "Contents/Resources/service_identity-24.2.0.dist-info/INSTALLER",
+      "sha256" : "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+    },
+    {
+      "bytes" : 5144,
+      "kind" : "file",
+      "path" : "Contents/Resources/service_identity-24.2.0.dist-info/METADATA",
+      "sha256" : "30f1bf529591f04d47e64b9094dbd43d148e3a4d86a1e824ad095a2e2f3d7f76"
+    },
+    {
+      "bytes" : 1046,
+      "kind" : "file",
+      "path" : "Contents/Resources/service_identity-24.2.0.dist-info/RECORD",
+      "sha256" : "f3305071f0c5898eca0599cea5c29dc5a1a9d576c3c113d9766ca964dab6bf6a"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/service_identity-24.2.0.dist-info/REQUESTED",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 87,
+      "kind" : "file",
+      "path" : "Contents/Resources/service_identity-24.2.0.dist-info/WHEEL",
+      "sha256" : "d7215d7625cc9af60aed0613aad44db57eba589d0ccfc3d8122114a0e514c516"
+    },
+    {
+      "bytes" : 1120,
+      "kind" : "file",
+      "path" : "Contents/Resources/service_identity-24.2.0.dist-info/licenses/LICENSE",
+      "sha256" : "24bd0a9ba7d0eae08a3a6e32a1b09f8e6871fa0325520a2fcb00e1539eaa602a"
+    },
+    {
+      "bytes" : 2,
+      "kind" : "file",
+      "path" : "Contents/Resources/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/INSTALLER",
+      "sha256" : "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+    },
+    {
+      "bytes" : 4670,
+      "kind" : "file",
+      "path" : "Contents/Resources/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/METADATA",
+      "sha256" : "a3e38b9ee4326289d4864704f30e299ee769e2309ce9f4a75f0de1a50ad0a356"
+    },
+    {
+      "bytes" : 1868,
+      "kind" : "file",
+      "path" : "Contents/Resources/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/RECORD",
+      "sha256" : "52a6b8ee0de15cf7fd99625f43b97cd2e3942ac86f16054ea90de48e66f29355"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/REQUESTED",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 91,
+      "kind" : "file",
+      "path" : "Contents/Resources/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/WHEEL",
+      "sha256" : "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b"
+    },
+    {
+      "bytes" : 10278,
+      "kind" : "file",
+      "path" : "Contents/Resources/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/licenses/LICENSE",
+      "sha256" : "458502e12d97bbf64438606a20044aa85eb05fb0a8a807bb35dbec253fd1fc04"
+    },
+    {
+      "bytes" : 19,
+      "kind" : "file",
+      "path" : "Contents/Resources/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/top_level.txt",
+      "sha256" : "08eddf0fdcb29403625e4acca38a872d5fe6a972f6b02e4914a82dd725804fe0"
+    },
+    {
+      "bytes" : 1335,
+      "kind" : "file",
+      "path" : "Contents/Resources/setuptools/_vendor/jaraco/text/Lorem ipsum.txt",
+      "sha256" : "37fedcffbf73c4eb9f058f47677cb33203a436ff9390e4d38a8e01c9dad28e0b"
+    },
+    {
+      "bytes" : 21,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/tornado",
+      "sha256" : "cdc73090b6f2f65a02891d933ce40d9ca3d4faa48fdde46996b2f4fa8dd77418",
+      "target" : "../Frameworks/tornado"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/wcwidth/py.typed",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 2,
+      "kind" : "file",
+      "path" : "Contents/Resources/werkzeug-3.1.5.dist-info/INSTALLER",
+      "sha256" : "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+    },
+    {
+      "bytes" : 4029,
+      "kind" : "file",
+      "path" : "Contents/Resources/werkzeug-3.1.5.dist-info/METADATA",
+      "sha256" : "72abb204bfa6479d98b0d5db9ec931203290024da4b5b4a09b2a32a9381eb05f"
+    },
+    {
+      "bytes" : 5452,
+      "kind" : "file",
+      "path" : "Contents/Resources/werkzeug-3.1.5.dist-info/RECORD",
+      "sha256" : "2b9f9d07275bbd4cf2e6e61c4c8a195a79c5ce0017006851eafcda2a73c2c517"
+    },
+    {
+      "bytes" : 0,
+      "kind" : "file",
+      "path" : "Contents/Resources/werkzeug-3.1.5.dist-info/REQUESTED",
+      "sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes" : 82,
+      "kind" : "file",
+      "path" : "Contents/Resources/werkzeug-3.1.5.dist-info/WHEEL",
+      "sha256" : "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db"
+    },
+    {
+      "bytes" : 1475,
+      "kind" : "file",
+      "path" : "Contents/Resources/werkzeug-3.1.5.dist-info/licenses/LICENSE.txt",
+      "sha256" : "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b"
+    },
+    {
+      "bytes" : 23,
+      "kind" : "symlink",
+      "path" : "Contents/Resources/zstandard",
+      "sha256" : "601bc621c8a47b77cba895f404a7b5852b52df7ed8ceee52f7ca43d113cdde9e",
+      "target" : "../Frameworks/zstandard"
+    },
+    {
+      "bytes" : 157,
+      "kind" : "file",
+      "path" : "Contents/_CodeSignature/CodeDirectory",
+      "sha256" : "ac1310a0e8c21cfeae782ce7aead54da4d734a3cf035b2302fbf27213f8f46e5"
+    },
+    {
+      "bytes" : 228,
+      "kind" : "file",
+      "path" : "Contents/_CodeSignature/CodeRequirements",
+      "sha256" : "f9b8d96b8d0371eb5bcdc5427e24e670258773750a0b504b746954a774127807"
+    },
+    {
+      "bytes" : 205,
+      "kind" : "file",
+      "path" : "Contents/_CodeSignature/CodeRequirements-1",
+      "sha256" : "7357d74363763fb2eb03f319360c0edcb0e6610a0aeef880bf2a4c5ce8382cbb"
+    },
+    {
+      "bytes" : 86358,
+      "kind" : "file",
+      "path" : "Contents/_CodeSignature/CodeResources",
+      "sha256" : "bdc39e16ffc1a7b74b7b74877ae442d8a938f8ee50f453be35c665bd6c13ef63"
+    },
+    {
+      "bytes" : 9061,
+      "kind" : "file",
+      "path" : "Contents/_CodeSignature/CodeSignature",
+      "sha256" : "1ee257cee8ffff4e4001684acb2aebf34f16bd78a6fd93771e575ab96bac17cb"
+    }
+  ],
+  "mitmproxyVersion" : "12.2.3",
+  "noticeSources" : {
+    "OpenSSL-3.5.5-LICENSE.txt" : "https://raw.githubusercontent.com/openssl/openssl/openssl-3.5.5/LICENSE.txt",
+    "Python-3.14.4-LICENSE.txt" : "https://raw.githubusercontent.com/python/cpython/v3.14.4/LICENSE",
+    "mitmproxy-12.2.3-LICENSE.txt" : "https://raw.githubusercontent.com/mitmproxy/mitmproxy/v12.2.3/LICENSE"
+  },
+  "opensslVersion" : "OpenSSL 3.5.5 27 Jan 2026",
+  "pythonVersion" : "3.14.4",
+  "schemaVersion" : 1
+}
