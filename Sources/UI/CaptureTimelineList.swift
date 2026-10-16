@@ -81,6 +81,7 @@ struct CaptureTimelineList: NSViewRepresentable {
         private var previousNewestFirst = false
         private var previousWrapLines = false
         private var previousWidth: CGFloat = 0
+        private var previousHeight: CGFloat = 0
         private var lastOlderEdgeID: String?
         private var edgeCheckScheduled = false
         private var isAttached = false
@@ -113,6 +114,7 @@ struct CaptureTimelineList: NSViewRepresentable {
             let wrapChanged = previousWrapLines != parent.wrapLines
             let orderChanged = previousNewestFirst != parent.newestFirst
             let widthChanged = abs(scrollView.contentView.bounds.width - previousWidth) > 0.5
+            let heightChanged = abs(scrollView.contentView.bounds.height - previousHeight) > 0.5
             let followEnabled = !previousFollowLatest && parent.followLatest
             let jumpRequested = lastJumpToken.map { $0 != parent.jumpToLatestToken } ?? false
             self.parent = parent
@@ -150,9 +152,9 @@ struct CaptureTimelineList: NSViewRepresentable {
                 table.layoutSubtreeIfNeeded()
             }
 
-            if jumpRequested || followEnabled || parent.followLatest && (dataChanged || wrapChanged || orderChanged || widthChanged) {
+            if jumpRequested || followEnabled || parent.followLatest && (dataChanged || wrapChanged || orderChanged || widthChanged || heightChanged) {
                 scrollToLatest()
-            } else if dataChanged || wrapChanged || orderChanged || widthChanged {
+            } else if dataChanged || wrapChanged || orderChanged || widthChanged || heightChanged {
                 restoreViewport(anchor)
             }
 
@@ -160,6 +162,7 @@ struct CaptureTimelineList: NSViewRepresentable {
             previousNewestFirst = parent.newestFirst
             previousWrapLines = parent.wrapLines
             previousWidth = scrollView.contentView.bounds.width
+            previousHeight = scrollView.contentView.bounds.height
             lastJumpToken = parent.jumpToLatestToken
             scheduleOlderEdgeCheck()
         }
@@ -260,12 +263,15 @@ struct CaptureTimelineList: NSViewRepresentable {
         @objc private func boundsChanged(_ notification: Notification) {
             guard !isApplyingUpdate, let scrollView, let table else { return }
             let width = scrollView.contentView.bounds.width
-            if abs(width - previousWidth) > 0.5 {
+            let height = scrollView.contentView.bounds.height
+            let widthChanged = abs(width - previousWidth) > 0.5
+            if widthChanged || abs(height - previousHeight) > 0.5 {
                 let anchor = viewportAnchor()
                 isApplyingUpdate = true
                 previousWidth = width
+                previousHeight = height
                 fitColumnToViewport()
-                if parent.wrapLines {
+                if widthChanged && parent.wrapLines {
                     table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: rows.indices))
                     table.layoutSubtreeIfNeeded()
                 }

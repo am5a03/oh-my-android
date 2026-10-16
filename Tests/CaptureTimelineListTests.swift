@@ -138,6 +138,40 @@ struct CaptureTimelineListTests {
         #expect(!harness.state.followLatest)
     }
 
+    @Test func headerResizesPreserveHeldReadingPositionAndSelection() throws {
+        let harness = Harness(rows: makeRows(0..<160))
+        defer { harness.close() }
+        harness.state.selectedID = "event-80"
+        harness.update()
+        harness.scroll(toRow: 75, offset: 11)
+        let anchor = try harness.anchor()
+
+        for height: CGFloat in [180, 280, 450, 220, 520, 320] {
+            harness.resize(width: 640, height: height)
+            try harness.expectAnchor(anchor)
+            #expect(harness.selectedID == "event-80")
+            #expect(!harness.state.followLatest)
+        }
+        #expect(harness.state.interactions == 0)
+    }
+
+    @Test func headerResizesKeepFollowingAtTheLatestEdgeInBothOrders() {
+        let harness = Harness(rows: makeRows(0..<160), followLatest: true)
+        defer { harness.close() }
+        for height: CGFloat in [180, 280, 450, 220, 520, 320] {
+            harness.resize(width: 640, height: height)
+            #expect(harness.isAtBottom)
+        }
+        harness.state.rows.reverse()
+        harness.state.newestFirst = true
+        harness.update()
+        for height: CGFloat in [180, 280, 450, 220, 520, 320] {
+            harness.resize(width: 640, height: height)
+            #expect(harness.isAtTop)
+        }
+        #expect(harness.state.interactions == 0)
+    }
+
     @Test func wrappedRowsResizeWithThePaneAndReturnToCompactHeight() throws {
         let text = String(repeating: "A request detail that should wrap across several lines. ", count: 12)
         let harness = Harness(rows: makeRows(0..<40, summary: text))
@@ -244,8 +278,8 @@ private final class Harness {
         table.layoutSubtreeIfNeeded()
     }
 
-    func resize(width: CGFloat) {
-        scrollView.setFrameSize(NSSize(width: width, height: 320))
+    func resize(width: CGFloat, height: CGFloat = 320) {
+        scrollView.setFrameSize(NSSize(width: width, height: height))
         scrollView.layoutSubtreeIfNeeded()
         update()
     }
