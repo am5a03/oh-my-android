@@ -6,8 +6,10 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 final class CaptureStore {
-    let setup = CaptureSetupStore()
+    let setup: CaptureSetupStore
+    let doctor = CaptureDoctorStore()
     var isSetupPresented = false
+    var isDoctorPresented = false
     private(set) var devices: [CaptureDevice] = []
     private(set) var tools: [String: String?] = [:]
     private(set) var networkServices: [String] = []
@@ -87,7 +89,9 @@ final class CaptureStore {
     var selectedEventID: String? { didSet { if selectedEventID != oldValue { loadSelectedEvent() } } }
     var markerText = ""
     private(set) var outputRoot: URL
+    @ObservationIgnored private let setupInspector: CaptureSetupInspector
     @ObservationIgnored private let hostExecutable: URL?
+    @ObservationIgnored private let discover: @Sendable (CaptureToolConfiguration) async throws -> NativeCaptureDiscoveryResult
     @ObservationIgnored private var pollingTask: Task<Void, Never>?
     @ObservationIgnored private var timelineTask: Task<Void, Never>?
     @ObservationIgnored private var detailTask: Task<Void, Never>?
@@ -109,12 +113,19 @@ final class CaptureStore {
     @ObservationIgnored private var timelineOperationID = UUID()
 
     init(hostExecutable: URL? = nil, rememberedPlanDefaults: UserDefaults? = nil,
-         initialDiscovery: NativeCaptureDiscoveryResult? = nil, outputRoot: URL? = nil) {
+         initialDiscovery: NativeCaptureDiscoveryResult? = nil, outputRoot: URL? = nil,
+         setupInspector: CaptureSetupInspector = CaptureSetupInspector(),
+         discover: @escaping @Sendable (CaptureToolConfiguration) async throws -> NativeCaptureDiscoveryResult = { configuration in
+             try await NativeCaptureDiscovery().discover(configuration: configuration)
+         }) {
         self.hostExecutable = hostExecutable
+        self.setupInspector = setupInspector
+        self.setup = CaptureSetupStore(inspector: setupInspector)
+        self.discover = discover
         self.outputRoot = outputRoot ?? UserDefaults.standard.string(forKey: "capture.sessionsRoot").map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? CaptureSessionRegistry.defaultRoot
         if let initialDiscovery { acceptDiscovery(initialDiscovery) }
-        if let rememberedPlanDefaults { setup.restoreRememberedPlan(self, defaults: rememberedPlanDefaults) }
+        if let rememberedPlanDefaults { setup.loadProgress(defaults: rememberedPlanDefaults) }
     }
 
     var selectedDevice: CaptureDevice? { devices.first { $0.selectionID == selectedDeviceID } }
@@ -123,9 +134,6 @@ final class CaptureStore {
     func selectDeviceForCapture(_ selectionID: String) {
         guard !hasActiveCapture else { return }
         selectedDeviceID = selectionID
-        if let plan = setup.appliedPlan, selectedDevice?.platform == plan.platform.rawValue {
-            setup.restoreReviewedAppScope(self)
-        }
         Task { [weak self] in await self?.refreshApplications() }
     }
     var hasOwnActiveCapture: Bool { isStarting || session?.isActive == true || session?.needsRoutingRecovery == true }
@@ -134,12 +142,11 @@ final class CaptureStore {
     var operationSession: CaptureSession? { setup.checkCapture?.hasActiveCapture == true ? setup.checkCapture?.session : session }
     var isOperationBusy: Bool { isBusy || setup.isLaunchingCheck || setup.isPreparingCertificate || (setup.checkCapture?.hasActiveCapture == true && setup.checkCapture?.isBusy == true) }
     var canStart: Bool {
-        !isBusy && !hasActiveCapture && selectedDevice?.isReady == true && (captureLogs || captureNetwork)
+        !isBusy && !hasActiveCapture && !doctor.isRepairing && selectedDevice?.isReady == true && (captureLogs || captureNetwork)
             && !(captureNetwork && selectedDevice?.platform == "simulator" && networkService.isEmpty)
             && !(captureNetwork && selectedDevice?.platform == "iphone" && iphoneTunnelConfiguration == nil)
             && !(captureLogs && selectedDevice?.platform == "iphone" && toolPath("idevicesyslog") == nil)
             && (!captureLogs || logConfigurationIssue == nil)
-            && setup.configurationIssue(self) == nil
     }
     // The retained window is chronological; reversing never changes the user's following preference.
     var visibleEvents: [NativeTimelineRow] {
@@ -260,13 +267,14 @@ final class CaptureStore {
         } catch { recordFailure(error); return false }
     }
 
-    func refreshDevices(includeApplications: Bool = true) async {
-        guard !isBusy, !hasActiveCapture else { return }
+    func refreshDevices(includeApplications: Bool = true, allowSetupCheck: Bool = false) async {
+        guard !isBusy, !hasOwnActiveCapture, !doctor.isRepairing,
+              allowSetupCheck || !setup.hasLiveCheck else { return }
         isBusy = true
         error = nil
         defer { isBusy = false }
         do {
-            let discovery = try await NativeCaptureDiscovery().discover(configuration: .init(
+            let discovery = try await discover(.init(
                 adbPath: nonempty(adbPath), mitmdumpPath: nonempty(mitmdumpPath)))
             acceptDiscovery(discovery)
             if !networkServices.contains(networkService) { networkService = "" }
@@ -274,6 +282,7 @@ final class CaptureStore {
             loadIPhoneSetup()
             if includeApplications { await refreshApplications() }
             else if selectedDevice?.isReady != true { applications = [] }
+            await setup.inspect(self)
         } catch { recordFailure(error) }
     }
 
@@ -289,7 +298,7 @@ final class CaptureStore {
 
     /// External context is a suggestion. Never replace a recording, inspected session or unavailable target.
     func applyExternalSelection(platform: String, deviceID: String, applicationID: String?) async {
-        guard session == nil, !hasActiveCapture, !isBusy, !isSetupPresented, setup.appliedPlan == nil else {
+        guard session == nil, !hasActiveCapture, !isBusy, !isSetupPresented else {
             externalRequestNotice = "A companion requested \(applicationID ?? platform) on device \(deviceID). Your current session and selection remain open."
             return
         }
@@ -366,7 +375,7 @@ final class CaptureStore {
         error = nil
         defer { isBusy = false; isStarting = false; if session?.isActive != true { logScopeMode = .app } }
         do {
-            if setup.appliedPlan != nil || setupContext?.purpose == .recording {
+            if setupContext?.purpose == .recording {
                 while setup.isInspecting { try await Task.sleep(for: .milliseconds(20)) }
                 await setup.inspect(self)
                 setupContext = setup.recordingContext(self)
@@ -496,6 +505,7 @@ final class CaptureStore {
     }
 
     func stopBeforeQuit() async {
+        await doctor.stopBeforeQuit()
         while setup.isLaunchingCheck || setup.isPreparingCertificate { try? await Task.sleep(for: .milliseconds(100)) }
         if let check = setup.checkCapture, check.hasActiveCapture { await check.stopBeforeQuit() }
         guard setup.checkCapture?.hasActiveCapture != true else { isSetupPresented = true; return }
@@ -505,30 +515,32 @@ final class CaptureStore {
 
     /// Keep the inspected session and its viewport intact while a short check records separately.
     func makeSetupCheck() -> CaptureStore {
-        let check = CaptureStore(hostExecutable: hostExecutable)
+        let check = CaptureStore(hostExecutable: hostExecutable, setupInspector: setupInspector, discover: discover)
         check.outputRoot = outputRoot
         check.devices = devices; check.tools = tools; check.networkServices = networkServices
         check.didDiscover = didDiscover; check.discoveryCheckedAt = discoveryCheckedAt
         check.selectedDeviceID = selectedDeviceID
-        check.applications = applications
-        check.captureLogs = captureLogs; check.captureNetwork = captureNetwork
-        check.targetApp = targetApp; check.logScopeMode = logScopeMode
-        check.logHelpers = logHelpers; check.logExecutableOverride = logExecutableOverride
-        check.logLimitMB = min(logLimitMB, 10); check.logLimitRecords = min(logLimitRecords, 10_000)
-        check.logLimitMinutes = 1
-        let bytes = min(requestedLogPolicy.max_bytes, 10_000_000)
-        let records = min(requestedLogPolicy.max_records, 10_000)
-        let seconds = min(requestedLogPolicy.max_duration_seconds, 45)
-        check.appliedSetupLoggingPolicy = CaptureLoggingPolicy(max_bytes: bytes, max_records: records,
-            max_duration_seconds: seconds, warning_bytes: max(1, bytes * 4 / 5),
-            warning_records: max(1, records * 4 / 5), warning_duration_seconds: seconds * 0.8)
+        check.captureLogs = false; check.captureNetwork = true
+        check.targetApp = ""; check.logScopeMode = .app
+        check.logHelpers = ""; check.logExecutableOverride = ""
+        check.appliedSetupLoggingPolicy = nil
         check.networkService = networkService; check.trustSimulatorCA = trustSimulatorCA
         check.adbPath = adbPath; check.mitmdumpPath = mitmdumpPath
         check.iphoneEndpointHost = iphoneEndpointHost; check.iphoneTunnelConfiguration = iphoneTunnelConfiguration
         return check
     }
 
-    func showSetup() { isSetupPresented = true }
+    func showSetup() {
+        guard !doctor.isRepairing else { return }
+        isDoctorPresented = false
+        isSetupPresented = true
+        if !setup.hasLiveCheck { setup.step = .choose }
+    }
+    func showDoctor() {
+        guard !setup.hasLiveCheck else { return }
+        isDoctorPresented = true
+    }
+    func dismissDoctor() { guard !doctor.isRepairing else { return }; isDoctorPresented = false }
     var hasSetupReport: Bool { setup.report != nil }
     func exportSetupReport() async { await setup.exportReadinessReport() }
 
@@ -551,9 +563,11 @@ final class CaptureStore {
         let nonce = setupContext?.probeNonce
         var httpsNonce: String?
         var deviceNonce: String?
+        var observedAt = Date()
         if let nonce, let event = try? await index.setupProbeEvent(nonce: nonce),
            let observed = Self.setupDate(event.receivedAt ?? event.timestamp), observed >= started {
             httpsNonce = nonce
+            observedAt = observed
             // Loopback routing does not distinguish a phone request from a Mac proxy request.
             if event.detail.value(for: "setup_probe_device_origin")?.boolValue == true { deviceNonce = nonce }
         }
@@ -562,7 +576,7 @@ final class CaptureStore {
         let verifiedScope = scope?.value(for: "mode")?.stringValue == "app"
             && scope?.value(for: "application_id")?.stringValue == targetApp && !targetApp.isEmpty
         return CaptureSetupObservations(identityFingerprint: identityFingerprint, sessionID: session.id,
-            sessionStartedAt: started, observedAt: Date(), deviceRoutingNonce: deviceNonce,
+            sessionStartedAt: started, observedAt: observedAt, deviceRoutingNonce: deviceNonce,
             httpsResponseNonce: httpsNonce, selectedAppLogRecords: latestSnapshot?.parsedLogEvents ?? 0,
             logScopeVerified: verifiedScope,
             certificateRejections: latestSnapshot?.networkDiagnostics["certificate_rejections", default: 0] ?? 0,

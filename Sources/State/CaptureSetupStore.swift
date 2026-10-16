@@ -10,28 +10,24 @@ final class CaptureSetupStore {
         case choose, prepare, check, record
         var title: String {
             switch self {
-            case .choose: "Choose Capture"
-            case .prepare: "Prepare Device"
-            case .check: "Check Capture"
-            case .record: "Record & Save"
+            case .choose: "Connect"
+            case .prepare: "Prepare Phone"
+            case .check: "Check Connection"
+            case .record: "Open Timeline"
             }
         }
     }
 
     var step = Step.choose
-    var appSearch = ""
     private(set) var report: CaptureSetupReport?
     private(set) var isInspecting = false
     private(set) var isLaunchingCheck = false
     private(set) var checkCapture: CaptureStore?
     private(set) var checkStartedAt: Date?
     private(set) var checkDeadlineReached = false
-    private(set) var pendingPlan: CapturePlan?
-    private(set) var appliedPlan: CapturePlan?
     private(set) var notice: String?
     private(set) var error: String?
     private(set) var isTransferringCertificate = false
-    private(set) var recordingSessionID: String?
     private(set) var browserHTTPSObserved = false
     private(set) var phoneOriginConfirmed = false
     private(set) var isExportingReport = false
@@ -39,13 +35,19 @@ final class CaptureSetupStore {
     private(set) var isCertificatePreparation = false
     private(set) var certificateWasCopied = false
     private(set) var certificatePreparationDeviceID: String?
+    @ObservationIgnored private let inspector: CaptureSetupInspector
     @ObservationIgnored private var checkDeadline: Task<Void, Never>?
     @ObservationIgnored private var reportRevision = UUID()
     @ObservationIgnored private var checkIdentityFingerprint: String?
     @ObservationIgnored private var checkOwnerConfiguration: String?
     @ObservationIgnored private var reportConfiguration: String?
-    @ObservationIgnored private var rememberedPlanDefaults: UserDefaults?
-    private static let rememberedPlanKey = "capture.setup.appliedPlan.v1"
+    @ObservationIgnored private var progressDefaults: UserDefaults?
+    private(set) var deviceProgress: [CaptureDeviceSetupProgress] = []
+    @ObservationIgnored private var firstRunOffered = false
+    private static let progressKey = "capture.setup.devices.v1"
+    private static let offeredKey = "capture.setup.offered.v1"
+
+    init(inspector: CaptureSetupInspector = CaptureSetupInspector()) { self.inspector = inspector }
 
     var hasLiveCheck: Bool { isLaunchingCheck || isPreparingCertificate || checkCapture?.hasActiveCapture == true }
     var verificationCapture: CaptureStore? { isCertificatePreparation ? nil : checkCapture }
@@ -62,17 +64,103 @@ final class CaptureSetupStore {
         }
     }
 
-    func restoreRememberedPlan(_ owner: CaptureStore, defaults: UserDefaults) {
-        rememberedPlanDefaults = defaults
-        guard let data = defaults.data(forKey: Self.rememberedPlanKey) else { return }
-        do {
-            try reviewPlan(data: data)
-            applyPendingPlan(owner)
-            notice = "Your last capture task is ready. Reconnect its device; setup checks will run again."
-            owner.isSetupPresented = true
-        } catch {
-            notice = "The saved capture task could not be read. Open a new plan or choose manual capture."
+    /// Migrate away from remembered tasks without changing a user's recording configuration.
+    func loadProgress(defaults: UserDefaults) {
+        progressDefaults = defaults
+        defaults.removeObject(forKey: "capture.setup.appliedPlan.v1")
+        firstRunOffered = defaults.bool(forKey: Self.offeredKey)
+        if let data = defaults.data(forKey: Self.progressKey), data.count <= 131_072,
+           let saved = try? JSONDecoder().decode([CaptureDeviceSetupProgress].self, from: data) {
+            deviceProgress = Array(saved.filter(\.isValid).suffix(100))
         }
+    }
+
+    func offerFirstRunIfNeeded(_ owner: CaptureStore) {
+        guard !firstRunOffered, !owner.hasActiveCapture, !owner.isBusy, owner.session == nil,
+              !owner.isDoctorPresented else { return }
+        firstRunOffered = true
+        progressDefaults?.set(true, forKey: Self.offeredKey)
+        owner.isSetupPresented = true
+        step = .choose
+        selectOnlyReadyDevice(owner)
+    }
+
+    func selectOnlyReadyDevice(_ owner: CaptureStore) {
+        guard owner.selectedDeviceID.isEmpty, !owner.hasActiveCapture else { return }
+        let ready = owner.devices.filter(\.isReady)
+        if ready.count == 1 { owner.selectedDeviceID = ready[0].selectionID }
+    }
+
+    var isConnectionVerified: Bool {
+        guard let report, report.identity.fingerprint == checkIdentityFingerprint,
+              Date().timeIntervalSince(report.checkedAt) >= -5,
+              Date().timeIntervalSince(report.checkedAt) <= 600 else { return false }
+        return ["https", "device_routing"].allSatisfy { id in
+            report.checks.contains { $0.id == id && $0.state == .verified }
+        }
+    }
+
+    func canCheckConnection(_ owner: CaptureStore) -> Bool {
+        if !isLaunchingCheck, !isPreparingCertificate, !isCertificatePreparation,
+           let check = checkCapture, check.session?.platform == "iphone", check.hasActiveCapture,
+           checkOwnerConfiguration == configurationKey(owner) { return true }
+        return !owner.hasOwnActiveCapture && !owner.isBusy && !owner.doctor.isRepairing
+            && !hasLiveCheck && owner.selectedDevice?.isReady == true
+            && (owner.selectedDevice?.platform != "simulator" || !owner.networkService.isEmpty)
+            && (owner.selectedDevice?.platform != "iphone" || owner.iphoneTunnelConfiguration != nil)
+    }
+
+    @discardableResult
+    func completeSetup(_ owner: CaptureStore) async -> Bool {
+        guard !hasLiveCheck, !isCertificatePreparation, let check = checkCapture,
+              check.session?.routingRestored == true,
+              checkOwnerConfiguration == configurationKey(owner) else { return false }
+        await owner.refreshDevices(includeApplications: false)
+        await inspect(owner)
+        guard !Task.isCancelled, !hasLiveCheck, reportConfiguration == configurationKey(owner), isConnectionVerified,
+              let report, report.prerequisitesReady,
+              let progress = CaptureDeviceSetupProgress.completed(report: report) else {
+            notice = "The connection check is incomplete or the phone setup changed. Run Check Connection again."
+            return false
+        }
+        saveProgress(progress)
+        firstRunOffered = true; progressDefaults?.set(true, forKey: Self.offeredKey)
+        step = .record
+        notice = "Device setup complete. The browser connection was checked; app-specific trust may still need engineer support."
+        return true
+    }
+
+    func deferSetup(_ owner: CaptureStore) {
+        guard !hasLiveCheck else { noteWindowCloseRequested(); return }
+        if let device = owner.selectedDevice {
+            let completed = deviceProgress.last { $0.platform == device.platform && $0.deviceID == device.id && $0.status == .completed }
+            // Merely returning from setup must not erase completed history for an unchanged phone.
+            if completed == nil || report.map({ completed?.matches($0.identity) != true }) == true {
+                saveProgress(.deferred(platform: device.platform, deviceID: device.id, identity: report?.identity))
+            }
+        }
+        firstRunOffered = true; progressDefaults?.set(true, forKey: Self.offeredKey)
+        owner.isSetupPresented = false
+        notice = "HTTPS setup is unfinished. You can inspect saved evidence or record logs, then finish device setup when needed."
+    }
+
+    func setupPrompt(_ owner: CaptureStore) -> String? {
+        guard owner.captureNetwork, let device = owner.selectedDevice, !owner.isSetupPresented,
+              !owner.hasActiveCapture else { return nil }
+        guard let report, reportConfiguration == configurationKey(owner) else {
+            return "Check this phone's setup before capturing HTTPS."
+        }
+        let matching = deviceProgress.last { $0.platform == device.platform && $0.deviceID == device.id }
+        if matching?.matches(report.identity) == true, matching?.status == .completed { return nil }
+        if matching?.status == .deferred { return "HTTPS setup is unfinished for this phone." }
+        return matching == nil ? "Set up this phone to capture HTTPS requests." : "The capture certificate or phone connection changed. Check its setup again."
+    }
+
+    private func saveProgress(_ progress: CaptureDeviceSetupProgress) {
+        deviceProgress.removeAll { $0.platform == progress.platform && $0.deviceID == progress.deviceID }
+        deviceProgress.append(progress)
+        deviceProgress = Array(deviceProgress.suffix(100))
+        if let data = try? JSONEncoder().encode(deviceProgress) { progressDefaults?.set(data, forKey: Self.progressKey) }
     }
 
     func exportReadinessReport() async {
@@ -80,12 +168,12 @@ final class CaptureSetupStore {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.zip]
         panel.nameFieldStringValue = "Mobile-Capture-Setup-Report.zip"
-        panel.message = "Save a setup report for your engineer. It includes named readiness checks and the capture task, without recorded requests, logs, private keys or tunnel profiles."
+        panel.message = "Save a setup report for your engineer. It includes named readiness checks without recorded requests, logs, private keys or tunnel profiles."
         guard panel.runModal() == .OK, let destination = panel.url else { return }
         isExportingReport = true
         defer { isExportingReport = false }
         do {
-            let url = try await CaptureReadinessExport.export(report: report, plan: appliedPlan, to: destination)
+            let url = try await CaptureReadinessExport.export(report: report, to: destination)
             notice = "Setup report saved. Send this ZIP to your engineer to investigate the missing prerequisites."
             NSWorkspace.shared.activateFileViewerSelecting([url])
             error = nil
@@ -97,6 +185,7 @@ final class CaptureSetupStore {
             if !owner.hasActiveCapture && !owner.isBusy {
                 await owner.refreshDevices(includeApplications: false)
                 guard !Task.isCancelled, owner.isSetupPresented else { return }
+                selectOnlyReadyDevice(owner)
                 await inspect(owner)
             } else if checkCapture?.hasActiveCapture == true {
                 await inspect(owner)
@@ -106,34 +195,32 @@ final class CaptureSetupStore {
     }
 
     func inspect(_ owner: CaptureStore) async {
-        guard !isInspecting else { return }
+        // A newer configuration must wait for the bounded read, rather than be dropped while
+        // SwiftUI cancels an older .task(id:) inspection during a quick device switch.
+        while isInspecting {
+            do { try await Task.sleep(for: .milliseconds(20)) } catch { return }
+        }
+        guard !Task.isCancelled else { return }
         let requestedConfiguration = configurationKey(owner)
         let revision = UUID()
         reportRevision = revision
         isInspecting = true
         defer { if reportRevision == revision { isInspecting = false } }
         let usesCheck = !isCertificatePreparation && checkCapture?.session != nil && checkOwnerConfiguration == requestedConfiguration
-            && checkCapture?.setupContext?.plan == appliedPlan
         let subject = usesCheck ? checkCapture ?? owner : owner
         var request = CaptureSetupRequest(
-            device: subject.selectedDevice, application: subject.selectedApplication,
-            captureLogs: subject.captureLogs, captureNetwork: subject.captureNetwork,
+            device: owner.selectedDevice, captureLogs: false, captureNetwork: true,
             tools: subject.tools.compactMapValues { $0 }, outputDirectory: subject.outputRoot,
             networkServices: subject.networkServices, networkService: subject.networkService,
-            logScope: CaptureLogScope(mode: subject.logScopeMode,
-                applicationID: subject.targetApp.isEmpty ? nil : subject.targetApp,
-                helperProcessNames: subject.logHelpers.split(separator: ",").map(String.init),
-                executableOverride: subject.logExecutableOverride.isEmpty ? nil : subject.logExecutableOverride),
-            loggingPolicy: loggingPolicy(subject), iphoneEndpointHost: subject.iphoneEndpointHost,
-            planID: appliedPlan?.id, planVersion: appliedPlan?.version,
-            discoveryCheckedAt: subject.discoveryCheckedAt)
-        let inspector = CaptureSetupInspector()
+            logScope: CaptureLogScope(), loggingPolicy: CaptureLoggingPolicy(),
+            iphoneEndpointHost: owner.selectedDevice?.platform == "iphone" ? subject.iphoneEndpointHost : nil,
+            discoveryCheckedAt: owner.discoveryCheckedAt)
         var result = await inspector.inspect(request)
         if usesCheck {
             if checkIdentityFingerprint == nil { checkIdentityFingerprint = result.identity.fingerprint }
             if let fingerprint = checkIdentityFingerprint,
                var observations = await subject.setupObservations(identityFingerprint: fingerprint) {
-                browserHTTPSObserved = observations.httpsResponseNonce != nil
+                browserHTTPSObserved = observations.httpsResponseNonce != nil && result.identity.fingerprint == fingerprint
                 observations.deviceOriginConfirmedByUser = phoneOriginConfirmed && browserHTTPSObserved
                 if observations.deviceOriginConfirmedByUser { observations.deviceRoutingNonce = observations.httpsResponseNonce }
                 request.observations = observations
@@ -145,7 +232,7 @@ final class CaptureSetupStore {
             browserHTTPSObserved = false
             if !isCertificatePreparation, checkCapture?.session != nil { notice = "The capture configuration changed. Run a new check for these choices." }
         }
-        guard reportRevision == revision else { return }
+        guard !Task.isCancelled, reportRevision == revision else { return }
         guard configurationKey(owner) == requestedConfiguration else {
             report = nil; reportConfiguration = nil; browserHTTPSObserved = false
             return
@@ -155,17 +242,45 @@ final class CaptureSetupStore {
     }
 
     func startCheck(_ owner: CaptureStore) async {
-        guard owner.canStart, !hasLiveCheck else { return }
+        guard !owner.hasOwnActiveCapture, !owner.isBusy, !owner.doctor.isRepairing,
+              !isLaunchingCheck, !isPreparingCertificate else { return }
+        await owner.refreshDevices(includeApplications: false, allowSetupCheck: true)
+        guard owner.selectedDevice?.isReady == true else {
+            error = "Reconnect and unlock the selected phone, then check again. Any active capture connection still needs Stop and restoration."
+            return
+        }
+        if let check = checkCapture, check.hasActiveCapture, check.session?.platform == "iphone",
+           checkOwnerConfiguration == configurationKey(owner), !isCertificatePreparation {
+            step = .check
+            guard let began = checkStartedAt, Date().timeIntervalSince(began) < 480 else {
+                notice = "This setup connection is too old for a fresh verification. Turn off Mobile Capture in WireGuard, choose Stop Check & Save, then start a new connection check. Forwarding stays available until you confirm the tunnel is off."
+                return
+            }
+            armCheckDeadline(check); await inspect(owner); return
+        }
+        guard canCheckConnection(owner) else {
+            if hasLiveCheck { notice = "The phone configuration changed. Turn off its capture tunnel if enabled, then stop and restore the current connection before checking again." }
+            return
+        }
+        await launchNetworkCheck(owner, timed: true)
+    }
+
+    func startIPhonePreparation(_ owner: CaptureStore) async {
+        guard owner.selectedDevice?.platform == "iphone", canCheckConnection(owner) else { return }
+        await launchNetworkCheck(owner, timed: false)
+    }
+
+    private func launchNetworkCheck(_ owner: CaptureStore, timed: Bool) async {
         error = nil; notice = nil
         isCertificatePreparation = false
         let check = owner.makeSetupCheck()
-        check.setupContext = CaptureSessionSetupContext(purpose: .check, plan: appliedPlan,
+        check.setupContext = CaptureSessionSetupContext(purpose: .check,
             checks: portableChecks(owner), probeNonce: CaptureSessionSetupContext.freshProbeNonce())
         checkOwnerConfiguration = configurationKey(owner)
         checkIdentityFingerprint = nil; browserHTTPSObserved = false; phoneOriginConfirmed = false
         checkCapture = check
         isLaunchingCheck = true
-        step = .check
+        step = timed ? .check : .prepare
         checkDeadlineReached = false
         await check.start()
         isLaunchingCheck = false
@@ -173,8 +288,15 @@ final class CaptureSetupStore {
             error = check.error ?? "The check could not start. Review the device setup and try again."
             return
         }
-        checkStartedAt = Date()
+        let dateParser = ISO8601DateFormatter()
+        dateParser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        checkStartedAt = check.session.flatMap { dateParser.date(from: $0.startedAt) ?? ISO8601DateFormatter().date(from: $0.startedAt) } ?? Date()
         await inspect(owner)
+        if timed { armCheckDeadline(check) }
+    }
+
+    private func armCheckDeadline(_ check: CaptureStore) {
+        checkDeadlineReached = false
         checkDeadline?.cancel()
         checkDeadline = Task { [weak self, weak check] in
             do { try await Task.sleep(for: .seconds(45)) } catch { return }
@@ -200,7 +322,7 @@ final class CaptureSetupStore {
                     : "The capture connection is restored. Retry Prepare & Copy Certificate if the certificate was not copied."
             } else { notice = checkCapture.session?.packagePath == nil
                 ? "Check stopped. The original evidence is retained; use Retry Save if the ZIP is unavailable."
-                : "Check saved separately. Review the observed sources below before recording the issue." }
+                : "Check saved and the capture connection restored. Open the timeline when the connection is verified." }
         }
     }
 
@@ -258,6 +380,8 @@ final class CaptureSetupStore {
                 : "Finish the capture check before leaving setup. On iPhone, turn the capture tunnel off before Stop Check & Save."
             return
         }
+        firstRunOffered = true
+        progressDefaults?.set(true, forKey: Self.offeredKey)
         owner.isSetupPresented = false
     }
 
@@ -284,29 +408,8 @@ final class CaptureSetupStore {
         } catch { self.error = error.localizedDescription }
     }
 
-    func startRecording(_ owner: CaptureStore) async {
-        guard owner.canStart, !hasLiveCheck else { return }
-        owner.setupContext = recordingContext(owner)
-        await owner.start()
-        if owner.session?.isActive == true { recordingSessionID = owner.session?.id }
-    }
-
     func recordingContext(_ owner: CaptureStore) -> CaptureSessionSetupContext {
-        CaptureSessionSetupContext(purpose: .recording, plan: appliedPlan, checks: portableChecks(owner))
-    }
-
-    func configurationIssue(_ owner: CaptureStore) -> String? {
-        guard let plan = appliedPlan else { return nil }
-        if owner.selectedDevice?.platform != plan.platform.rawValue {
-            return "This capture plan requires a \(plan.platform.rawValue) device. Choose that device, or switch to manual capture."
-        }
-        if owner.targetApp != plan.applicationID {
-            return "Choose \(plan.applicationID) for this capture plan, or switch to manual capture."
-        }
-        if owner.captureLogs, owner.logScopeMode != .app {
-            return "This capture plan uses selected-app logs. Turn off whole-device logging, or switch to manual capture."
-        }
-        return nil
+        CaptureSessionSetupContext(purpose: .recording, checks: portableChecks(owner))
     }
 
     private func portableChecks(_ owner: CaptureStore) -> [CaptureSetupContextCheck] {
@@ -318,102 +421,14 @@ final class CaptureSetupStore {
         }
     }
 
-    func importPlan() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.message = "Open an engineer-provided capture plan. Review its scope before applying it."
-        panel.prompt = "Review Plan"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let size = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-            guard size.isRegularFile == true, (size.fileSize ?? Int.max) <= 65_536 else {
-                throw AppError("Capture plans must be regular JSON files no larger than 64 KB.")
-            }
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            try reviewPlan(data: handle.read(upToCount: CapturePlan.maximumFileBytes + 1) ?? Data())
-            error = nil
-        } catch { self.error = error.localizedDescription }
-    }
-
-    func discardPendingPlan() { pendingPlan = nil }
-
-    func reviewPlan(data: Data) throws { pendingPlan = try CapturePlan.decode(data) }
-
-    func applyPendingPlan(_ owner: CaptureStore) {
-        guard let plan = pendingPlan, !owner.hasActiveCapture, !owner.isBusy else { return }
-        appliedPlan = plan; pendingPlan = nil
-        owner.captureLogs = plan.captureLogs; owner.captureNetwork = plan.captureNetwork
-        owner.targetApp = plan.applicationID; owner.logScopeMode = .app
-        owner.logHelpers = plan.helperProcessNames.joined(separator: ",")
-        owner.logExecutableOverride = plan.executableName ?? ""
-        owner.logLimitMB = Int((plan.logLimits.maxBytes + 999_999) / 1_000_000)
-        owner.logLimitRecords = Int(plan.logLimits.maxRecords)
-        owner.logLimitMinutes = Int(ceil(plan.logLimits.maxDurationSeconds / 60))
-        // Exact plan budgets are retained separately for the runtime request; visible fields explain them.
-        owner.appliedSetupLoggingPolicy = plan.loggingPolicy
-        if let rememberedPlanDefaults {
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-            if let data = try? encoder.encode(plan) { rememberedPlanDefaults.set(data, forKey: Self.rememberedPlanKey) }
-        }
-        let platformName = plan.platform == .iphone ? "iPhone" : plan.platform.rawValue
-        notice = "Capture plan applied. Connect its \(platformName) device and review the requested sources."
-        step = .choose
-    }
-
-    /// A device change clears process identities in the base workspace. Restore the reviewed scope
-    /// after an explicit matching device selection; its platform is still checked before Start.
-    func restoreReviewedAppScope(_ owner: CaptureStore) {
-        guard let plan = appliedPlan, !owner.hasActiveCapture else { return }
-        owner.targetApp = plan.applicationID
-        owner.logScopeMode = .app
-        owner.logHelpers = plan.helperProcessNames.joined(separator: ",")
-        owner.logExecutableOverride = plan.executableName ?? ""
-    }
-
-    func useManualCapture(_ owner: CaptureStore) {
-        guard !owner.hasActiveCapture, !owner.isBusy else { return }
-        appliedPlan = nil; owner.appliedSetupLoggingPolicy = nil; owner.setupContext = nil
-        rememberedPlanDefaults?.removeObject(forKey: Self.rememberedPlanKey)
-        notice = "Manual capture selected. Review the app and sources before checking."
-    }
-
-    func missingRequiredSources(_ owner: CaptureStore) -> [String] {
-        guard let plan = appliedPlan else { return [] }
-        let required = [("Device logs", plan.sources.logs), ("Decoded HTTPS Requests & Responses", plan.sources.network)]
-            .compactMap { $0.1 == .required ? $0.0 : nil }
-        guard !isCertificatePreparation, checkOwnerConfiguration == configurationKey(owner), checkCapture?.setupContext?.plan == plan,
-              let session = checkCapture?.session else { return required }
-        let scope = session.context?.value(for: "log_scope")
-        let appLogs = scope?.value(for: "mode")?.stringValue == "app"
-            && scope?.value(for: "application_id")?.stringValue == plan.applicationID
-            && (checkCapture?.latestSnapshot?.parsedLogEvents ?? 0) > 0
-        let https = (checkCapture?.latestSnapshot?.networkDiagnostics["complete_task_https_exchanges", default: 0] ?? 0) > 0
-        return [("Device logs", plan.sources.logs, appLogs),
-                ("Decoded HTTPS Requests & Responses", plan.sources.network, https)]
-            .compactMap { title, requirement, observed in requirement == .required && !observed ? title : nil }
-    }
-
-    private func loggingPolicy(_ owner: CaptureStore) -> CaptureLoggingPolicy {
-        if let exact = owner.appliedSetupLoggingPolicy { return exact }
-        let bytes = Int64(owner.logLimitMB) * 1_000_000, records = Int64(owner.logLimitRecords)
-        let seconds = Double(owner.logLimitMinutes * 60)
-        return CaptureLoggingPolicy(max_bytes: bytes, max_records: records, max_duration_seconds: seconds,
-            warning_bytes: max(1, bytes * 4 / 5), warning_records: max(1, records * 4 / 5),
-            warning_duration_seconds: seconds * 0.8)
-    }
-
+    /// Only device/network choices affect first-run setup; everyday app/log options are independent.
     func configurationKey(_ owner: CaptureStore) -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        let plan = appliedPlan.flatMap { try? encoder.encode($0) }?.base64EncodedString() ?? ""
-        let exactPolicy = owner.appliedSetupLoggingPolicy.flatMap { try? encoder.encode($0) }?.base64EncodedString() ?? ""
-        return [owner.selectedDeviceID, owner.targetApp, String(owner.captureLogs), String(owner.captureNetwork),
-         owner.logScopeMode.rawValue, owner.logHelpers, owner.logExecutableOverride, String(owner.logLimitMB),
-         String(owner.logLimitRecords), String(owner.logLimitMinutes), owner.networkService,
-         String(owner.trustSimulatorCA), owner.iphoneEndpointHost, owner.adbPath, owner.mitmdumpPath,
-         owner.outputRoot.path, plan, exactPolicy]
+        [owner.selectedDeviceID,
+         owner.selectedDevice?.platform == "simulator" ? owner.networkService : "",
+         owner.selectedDevice?.platform == "simulator" ? String(owner.trustSimulatorCA) : "",
+         owner.selectedDevice?.platform == "iphone" ? owner.iphoneEndpointHost : "",
+         owner.adbPath, owner.mitmdumpPath, owner.outputRoot.path,
+         owner.tools.keys.sorted().map { "\($0)=\(owner.toolPath($0) ?? "")" }.joined(separator: "\n")]
             .joined(separator: "\u{1f}")
     }
 }

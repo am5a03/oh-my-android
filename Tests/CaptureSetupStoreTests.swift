@@ -4,156 +4,245 @@ import Testing
 
 @MainActor
 struct CaptureSetupStoreTests {
-    private var planData: Data {
-        Data(#"""
-        {"schema_version":1,"id":"ad-debug","version":2,"title":"Check an ad placement",
-         "platform":"android","application_id":"dev.example.test","executable_name":"Example",
-         "helper_process_names":["ExampleHelper"],"sources":{"logs":"required","network":"required"},
-         "log_limits":{"max_bytes":12345,"max_records":77,"max_duration_seconds":2.5},
-         "reproduction_steps":["Open the test app","Tap the placement"]}
-        """#.utf8)
+    @Test func `old remembered tasks are removed without altering everyday configuration`() throws {
+        let suite = "simplified-setup-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(Data(#"{"schema_version":1,"application_id":"dev.example.old"}"#.utf8), forKey: "capture.setup.appliedPlan.v1")
+        let store = CaptureStore(rememberedPlanDefaults: defaults)
+        #expect(defaults.data(forKey: "capture.setup.appliedPlan.v1") == nil)
+        #expect(store.targetApp.isEmpty && !store.captureLogs && store.captureNetwork)
+        #expect(store.setupContext == nil && store.setup.report == nil && !store.isSetupPresented)
     }
 
-    @Test func `reviewing a plan does not change capture scope until apply`() throws {
-        let store = CaptureStore()
-        store.targetApp = "dev.example.original"
-        try store.setup.reviewPlan(data: planData)
-        #expect(store.targetApp == "dev.example.original")
-        #expect(!store.captureLogs)
-        #expect(store.setup.appliedPlan == nil)
-        store.setup.applyPendingPlan(store)
-        #expect(store.setup.pendingPlan == nil)
-        #expect(store.setup.appliedPlan?.version == 2)
-        #expect(store.captureLogs && store.captureNetwork)
-        #expect(store.targetApp == "dev.example.test")
-        #expect(store.logScopeMode == .app)
-        #expect(store.logHelpers == "ExampleHelper")
-        #expect(store.logExecutableOverride == "Example")
-        #expect(store.appliedSetupLoggingPolicy?.max_bytes == 12_345)
-        #expect(store.appliedSetupLoggingPolicy?.max_duration_seconds == 2.5)
+    @Test func `the first-run offer occurs once and deferral survives relaunch without verifying trust`() throws {
+        let suite = "first-run-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = CaptureStore(rememberedPlanDefaults: defaults)
+        first.setup.offerFirstRunIfNeeded(first)
+        #expect(first.isSetupPresented)
+        first.setup.deferSetup(first)
+        #expect(!first.isSetupPresented && !first.setup.isConnectionVerified)
+        let relaunched = CaptureStore(rememberedPlanDefaults: defaults)
+        relaunched.setup.offerFirstRunIfNeeded(relaunched)
+        #expect(!relaunched.isSetupPresented)
+        #expect(relaunched.setup.report == nil && relaunched.setup.checkCapture == nil)
+        relaunched.showSetup()
+        #expect(relaunched.isSetupPresented)
     }
 
-    @Test func `edited limits and manual mode cannot retain a hidden engineer budget`() throws {
+    @Test func `setup creates a network-only child independent of all everyday log options`() throws {
         let store = CaptureStore()
-        try store.setup.reviewPlan(data: planData)
-        store.setup.applyPendingPlan(store)
-        store.logLimitMB = 2
-        #expect(store.appliedSetupLoggingPolicy == nil)
-        store.setupContext = store.setup.recordingContext(store)
-        store.setup.useManualCapture(store)
-        #expect(store.setup.appliedPlan == nil)
-        #expect(store.setupContext == nil)
-    }
-
-    @Test func `a check keeps exact small task limits and valid warning thresholds`() throws {
-        let store = CaptureStore()
-        try store.setup.reviewPlan(data: planData)
-        store.setup.applyPendingPlan(store)
+        store.captureLogs = true; store.captureNetwork = false
+        store.targetApp = "dev.example.original"; store.logHelpers = "Helper"; store.logExecutableOverride = "Original"
+        store.logLimitMB = -1; store.logLimitRecords = -1; store.logLimitMinutes = -1
         let check = store.makeSetupCheck()
-        let policy = try #require(check.appliedSetupLoggingPolicy)
-        #expect(policy.max_bytes == 12_345)
-        #expect(policy.max_records == 77)
-        #expect(policy.max_duration_seconds == 2.5)
-        #expect(throws: Never.self) { try policy.validated() }
-        #expect(store.appliedSetupLoggingPolicy?.max_bytes == 12_345)
-        #expect(check.setup.appliedPlan == nil)
+        #expect(!check.captureLogs && check.captureNetwork)
+        #expect(check.targetApp.isEmpty && check.logHelpers.isEmpty && check.logExecutableOverride.isEmpty)
+        #expect(check.appliedSetupLoggingPolicy == nil)
+        #expect(store.captureLogs && !store.captureNetwork && store.targetApp == "dev.example.original")
     }
 
-    @Test func `opening setup and creating a check preserve inspected evidence and selection`() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("guided-store-\(UUID().uuidString)")
+    @Test func `setup check permits logs-only everyday intent with no selected app`() throws {
+        let fixture = try PreparationFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        store.captureLogs = true; store.captureNetwork = false; store.logLimitMB = -1
+        #expect(!store.canStart)
+        #expect(store.setup.canCheckConnection(store))
+        #expect(store.targetApp.isEmpty)
+    }
+
+    @Test func `everyday app and log changes do not invalidate device setup choices`() {
+        let store = CaptureStore()
+        let initial = store.setup.configurationKey(store)
+        store.targetApp = "dev.example.new"; store.logHelpers = "Helper"
+        store.captureLogs = true; store.captureNetwork = false; store.logLimitRecords = 2
+        #expect(store.setup.configurationKey(store) == initial)
+        store.iphoneEndpointHost = "192.0.2.99"
+        #expect(store.setup.configurationKey(store) == initial)
+        store.mitmdumpPath = "/different-capture-engine"
+        #expect(store.setup.configurationKey(store) != initial)
+    }
+
+    @Test func `single ready device is selected without application discovery`() throws {
+        let fixture = try PreparationFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        store.selectedDeviceID = ""
+        store.setup.selectOnlyReadyDevice(store)
+        #expect(store.selectedDeviceID == "android:synthetic")
+        #expect(store.applications.isEmpty && !store.isLoadingApplications)
+        #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("commands").path))
+    }
+
+    @Test func `deferral and setup preserve inspected evidence and ordinary source settings`() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("simplified-store-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
         let metadata: [String: Any] = ["id":"saved-proof","directory":root.path,"platform":"android",
             "device_id":"synthetic","device_name":"Synthetic","started_at":"2026-10-15T00:00:00Z",
-            "phase":"saved","sources":["logs":"not_selected","network":"not_selected"],"routing_restored":true]
+            "phase":"saved","sources":["logs":"not_selected","network":"not_selected"],"routing_restored":true,
+            "context":["capture_setup":["plan":["application_id":"dev.example.old"]]]]
         try JSONSerialization.data(withJSONObject: metadata).write(to: root.appendingPathComponent("session.json"))
         let store = CaptureStore(hostExecutable: URL(fileURLWithPath: "/nonexistent-mobile-capture-host"))
         await store.loadSession(at: root)
-        store.targetApp = "dev.example.original"
+        store.targetApp = "dev.example.original"; store.captureLogs = true; store.captureNetwork = false
         store.search = "retained filter"
         store.showSetup()
         let check = store.makeSetupCheck()
-        #expect(store.session?.id == "saved-proof")
-        #expect(store.search == "retained filter")
-        #expect(store.targetApp == "dev.example.original")
-        #expect(check.session == nil)
-        #expect(check.targetApp == "dev.example.original")
-        #expect(!store.hasActiveCapture)
+        store.setup.deferSetup(store)
+        #expect(store.session?.id == "saved-proof" && store.search == "retained filter")
+        #expect(store.targetApp == "dev.example.original" && store.captureLogs && !store.captureNetwork)
+        #expect(check.session == nil && check.targetApp.isEmpty)
+        #expect(store.setupContext == nil && !store.isSetupPresented)
+    }
+
+    @Test func `opening setup help then dismissing retains completed device history`() throws {
+        let now = Date()
+        let progress = CaptureDeviceSetupProgress(platform: "iphone", deviceID: "synthetic", status: .completed,
+            caFingerprint: "current-ca", profileFingerprint: "current-profile", endpoint: "192.0.2.1", checkedAt: now, originBasis: .userReported)
+        let suite = "help-dismiss-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(try JSONEncoder().encode([progress]), forKey: "capture.setup.devices.v1")
+        let store = CaptureStore(rememberedPlanDefaults: defaults)
+        store.showSetup()
         store.setup.dismiss(store)
-        #expect(!store.isSetupPresented)
-        #expect(store.session?.id == "saved-proof")
+        #expect(store.setup.deviceProgress == [progress])
+        #expect(!store.isSetupPresented && !store.setup.isConnectionVerified)
+        let restored = CaptureStore(rememberedPlanDefaults: defaults)
+        #expect(restored.setup.deviceProgress == [progress])
     }
 
-    @Test func `unsupported plans leave the reviewed task and scope intact`() throws {
-        let store = CaptureStore()
-        try store.setup.reviewPlan(data: planData)
-        #expect(throws: (any Error).self) {
-            try store.setup.reviewPlan(data: Data(#"{"schema_version":999}"#.utf8))
-        }
-        #expect(store.setup.pendingPlan?.id == "ad-debug")
-        #expect(store.setup.appliedPlan == nil)
-        #expect(!store.captureLogs)
+    @Test func `network check starts without inheriting app or logs and cannot be dismissed while active`() async throws {
+        let fixture = try PreparationFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        store.captureLogs = true; store.captureNetwork = false
+        store.targetApp = ""; store.logLimitMB = -1
+        store.isSetupPresented = true
+        await store.setup.startCheck(store)
+        let request = try fixture.request()
+        #expect(request["capture_logs"] as? Bool == false)
+        #expect(request["capture_network"] as? Bool == true)
+        #expect(request["target_app"] == nil || request["target_app"] is NSNull)
+        #expect(request["logging_policy"] == nil || request["logging_policy"] is NSNull)
+        #expect(request["log_scope"] == nil || request["log_scope"] is NSNull)
+        #expect(store.captureLogs && !store.captureNetwork && store.logLimitMB == -1)
+        store.setup.deferSetup(store)
+        #expect(store.isSetupPresented && store.setup.hasLiveCheck)
+        #expect(store.setup.deviceProgress.isEmpty)
+        await store.setup.stopCheck()
+        store.setup.dismiss(store)
+        #expect(!store.isSetupPresented && !store.hasActiveCapture)
     }
 
-    @Test func `a device scope reset can restore the reviewed app and helper identities`() throws {
-        let store = CaptureStore()
-        try store.setup.reviewPlan(data: planData)
-        store.setup.applyPendingPlan(store)
-        store.selectedDeviceID = "android:synthetic-new-selection"
-        #expect(store.targetApp.isEmpty && store.logHelpers.isEmpty && store.logExecutableOverride.isEmpty)
-        store.setup.restoreReviewedAppScope(store)
-        #expect(store.targetApp == "dev.example.test")
-        #expect(store.logHelpers == "ExampleHelper")
-        #expect(store.logExecutableOverride == "Example")
-        #expect(store.logScopeMode == .app)
-        #expect(store.setup.missingRequiredSources(store).count == 2)
+    @Test func `missing current proof cannot complete setup or persist completed progress`() async throws {
+        let fixture = try PreparationFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        await store.setup.prepareAndroidCertificate(store)
+        #expect(await !store.setup.completeSetup(store))
+        #expect(!store.setup.deviceProgress.contains { $0.status == .completed })
     }
 
-    @Test func `advanced capture choices participate in readiness invalidation`() {
-        let store = CaptureStore()
-        let initial = store.setup.configurationKey(store)
-        store.logHelpers = "VerifiedHelper"
-        #expect(store.setup.configurationKey(store) != initial)
-        let helpers = store.setup.configurationKey(store)
-        store.logLimitRecords = 3
-        #expect(store.setup.configurationKey(store) != helpers)
-        let limits = store.setup.configurationKey(store)
-        store.trustSimulatorCA = true
-        #expect(store.setup.configurationKey(store) != limits)
-    }
-
-    @Test func `repeat use restores the reviewed task without restoring evidence verification`() throws {
-        let suite = "guided-setup-tests-\(UUID().uuidString)"
+    @Test func `a known phone stays quiet after relaunch while changed certificate offers repair`() async throws {
+        let fixture = try PreparationFixture()
+        defer { fixture.remove() }
+        let certificateSource = try #require(ProcessInfo.processInfo.environment["CAPTURE_SETUP_TEST_CA"])
+        let ca = fixture.root.appendingPathComponent("ca")
+        try FileManager.default.createDirectory(at: ca, withIntermediateDirectories: false)
+        let certificate = ca.appendingPathComponent("mitmproxy-ca-cert.pem")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: certificateSource), to: certificate)
+        let inspector = CaptureSetupInspector(applicationBundle: nil, caDirectory: ca,
+            iphoneProfileRoot: fixture.root.appendingPathComponent("profiles"), routingLockDirectory: fixture.root.appendingPathComponent("routing"),
+            availableDiskBytes: { _ in 4_000_000_000 })
+        let discovery = NativeCaptureDiscoveryResult(devices: [.init(id: "synthetic", name: "Synthetic", platform: "android", state: "ready")], tools: [:], networkServices: [], warnings: [])
+        let original = CaptureStore(initialDiscovery: discovery, outputRoot: fixture.root, setupInspector: inspector, discover: { _ in discovery })
+        original.selectedDeviceID = "android:synthetic"
+        await original.setup.inspect(original)
+        let report = try #require(original.setup.report)
+        let fingerprint = try #require(report.identity.caFingerprint)
+        let history = CaptureDeviceSetupProgress(platform: "android", deviceID: "synthetic", status: .completed,
+            caFingerprint: fingerprint, profileFingerprint: nil, endpoint: report.identity.endpoint,
+            checkedAt: Date(), originBasis: .userReported)
+        let suite = "repeat-phone-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let original = CaptureStore(rememberedPlanDefaults: defaults)
-        try original.setup.reviewPlan(data: planData)
-        original.setup.applyPendingPlan(original)
-        let restored = CaptureStore(rememberedPlanDefaults: defaults)
-        #expect(restored.setup.appliedPlan == original.setup.appliedPlan)
-        #expect(restored.targetApp == "dev.example.test")
-        #expect(restored.logHelpers == "ExampleHelper")
-        #expect(restored.appliedSetupLoggingPolicy?.max_bytes == 12_345)
-        #expect(restored.selectedDeviceID.isEmpty)
-        #expect(restored.isSetupPresented)
-        #expect(restored.setup.report == nil && restored.setup.checkCapture == nil)
-        #expect(!restored.setup.phoneOriginConfirmed && !restored.hasActiveCapture)
-        let stored = try #require(defaults.data(forKey: "capture.setup.appliedPlan.v1"))
-        #expect(try CapturePlan.decode(stored) == original.setup.appliedPlan)
-        #expect(!String(decoding: stored, as: UTF8.self).contains("probe_nonce"))
-        restored.setup.useManualCapture(restored)
-        #expect(defaults.data(forKey: "capture.setup.appliedPlan.v1") == nil)
+        defaults.set(try JSONEncoder().encode([history]), forKey: "capture.setup.devices.v1")
+        defaults.set(true, forKey: "capture.setup.offered.v1")
+        let restored = CaptureStore(rememberedPlanDefaults: defaults, initialDiscovery: discovery, outputRoot: fixture.root,
+            setupInspector: inspector, discover: { _ in discovery })
+        restored.selectedDeviceID = "android:synthetic"
+        await restored.refreshDevices(includeApplications: false)
+        restored.setup.offerFirstRunIfNeeded(restored)
+        #expect(!restored.isSetupPresented && !restored.setup.isConnectionVerified)
+        #expect(restored.setup.setupPrompt(restored) == nil)
+        try FileManager.default.removeItem(at: certificate)
+        await restored.refreshDevices(includeApplications: false)
+        #expect(restored.setup.setupPrompt(restored)?.contains("changed") == true)
     }
 
-    @Test func `an invalid remembered task does not select sources or start setup verification`() throws {
-        let suite = "guided-setup-invalid-tests-\(UUID().uuidString)"
+    @Test func `reading a saved HTTPS check retains its real observation time`() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("proof-time-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("network"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let proofTime = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970) - 60)
+        let started = proofTime.addingTimeInterval(-30)
+        let nonce = String(repeating: "a", count: 32)
+        let metadata: [String: Any] = ["id":"proof-time","directory":root.path,"platform":"android",
+            "device_id":"synthetic","device_name":"Synthetic","started_at":started.formatted(.iso8601),
+            "phase":"saved","sources":["logs":"not_selected","network":"observed"],"routing_restored":true]
+        try JSONSerialization.data(withJSONObject: metadata).write(to: root.appendingPathComponent("session.json"))
+        let body = String(decoding: try JSONSerialization.data(withJSONObject: ["nonce":nonce,"capture_check":"browser_https"]), as: UTF8.self)
+        let event: [String: Any] = ["timestamp":proofTime.formatted(.iso8601),"received_at":proofTime.formatted(.iso8601),
+            "kind":"response","detail":["url":"https://mitm.it/mobile-capture-check/\(nonce)/https","status":200,
+            "setup_probe":true,"setup_probe_nonce":nonce,"response_body":["encoding":"utf-8","text":body,"bytes":body.utf8.count]]]
+        var line = try JSONSerialization.data(withJSONObject: event); line.append(10)
+        try line.write(to: root.appendingPathComponent("network/events.jsonl"))
+        let store = CaptureStore(hostExecutable: root.appendingPathComponent("nonexistent-host"))
+        await store.loadSession(at: root)
+        store.setupContext = .init(purpose: .check, probeNonce: nonce)
+        let observations = try #require(await store.setupObservations(identityFingerprint: "synthetic"))
+        #expect(observations.httpsResponseNonce == nonce)
+        #expect(abs(observations.observedAt.timeIntervalSince(proofTime)) < 0.01)
+        #expect(observations.observedAt < Date().addingTimeInterval(-55))
+    }
+
+    @Test func `historical completion is tied to device CA and iPhone profile and never restores live verification`() throws {
+        let now = Date()
+        let identity = Self.identity()
+        let checks = [
+            CaptureSetupCheck(id: "https", state: .verified, title: "HTTPS", message: "proof", code: "browser_https_nonce_verified", basis: .observedHTTPSExchange, checkedAt: now, actions: [], isPrerequisite: false),
+            CaptureSetupCheck(id: "device_routing", state: .verified, title: "Phone", message: "human", code: "device_action_user_confirmed", basis: .userReported, checkedAt: now, actions: [], isPrerequisite: false)
+        ]
+        let progress = try #require(CaptureDeviceSetupProgress.completed(report: .init(identity: identity, checkedAt: now, checks: checks)))
+        #expect(progress.matches(identity) && progress.originBasis == .userReported)
+        #expect(!progress.matches(Self.identity(certificate: "changed")))
+        #expect(!progress.matches(Self.identity(profile: "changed")))
+        #expect(!progress.matches(Self.identity(device: "different")))
+        #expect(!progress.matches(Self.identity(endpoint: "192.0.2.99")))
+        let android = CaptureDeviceSetupProgress(platform: "android", deviceID: "synthetic", status: .completed,
+            caFingerprint: "current-ca", profileFingerprint: nil, endpoint: "old-ip", checkedAt: now, originBasis: .userReported)
+        #expect(android.matches(Self.identity(platform: "android", profile: nil, endpoint: "new-ip")))
+        #expect(CaptureDeviceSetupProgress.completed(report: .init(identity: identity, checkedAt: now, checks: Array(checks.prefix(1)))) == nil)
+        #expect(CaptureDeviceSetupProgress.completed(report: .init(identity: Self.identity(profile: nil), checkedAt: now, checks: checks)) == nil)
+        let suite = "progress-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set(Data(#"{"schema_version":999}"#.utf8), forKey: "capture.setup.appliedPlan.v1")
+        defaults.set(try JSONEncoder().encode([progress]), forKey: "capture.setup.devices.v1")
         let restored = CaptureStore(rememberedPlanDefaults: defaults)
-        #expect(restored.setup.appliedPlan == nil)
-        #expect(restored.setup.report == nil)
-        #expect(!restored.captureLogs && !restored.hasActiveCapture)
+        #expect(restored.setup.deviceProgress == [progress])
+        #expect(!restored.setup.isConnectionVerified && restored.setup.report == nil)
+        #expect(restored.setup.checkCapture == nil && !restored.hasActiveCapture)
+    }
+
+    private static func identity(platform: String = "iphone", certificate: String? = "current-ca", profile: String? = "current-profile", device: String = "synthetic", endpoint: String = "192.0.2.1") -> CaptureSetupIdentity {
+        .init(platform: platform, deviceID: device, applicationID: nil, appBuild: nil, osVersion: nil,
+            engineVersion: "12.2.3", caFingerprint: certificate, profileFingerprint: profile, endpoint: endpoint,
+            planID: nil, planVersion: nil, fingerprint: "synthetic-identity")
     }
 
     @Test func `Android certificate preparation restores the connection before installation help`() async throws {
@@ -232,10 +321,11 @@ struct CaptureSetupStoreTests {
         }
 
         @MainActor func store() -> CaptureStore {
-            let store = CaptureStore(hostExecutable: host,
-                initialDiscovery: NativeCaptureDiscoveryResult(
-                    devices: [.init(id: "synthetic", name: "Synthetic Android", platform: "android", state: "ready")],
-                    tools: [:], networkServices: [], warnings: []), outputRoot: root.appendingPathComponent("sessions"))
+            let discovery = NativeCaptureDiscoveryResult(
+                devices: [.init(id: "synthetic", name: "Synthetic Android", platform: "android", state: "ready")],
+                tools: [:], networkServices: [], warnings: [])
+            let store = CaptureStore(hostExecutable: host, initialDiscovery: discovery,
+                outputRoot: root.appendingPathComponent("sessions"), discover: { _ in discovery })
             store.selectedDeviceID = "android:synthetic"
             return store
         }
