@@ -31,6 +31,7 @@ nonisolated struct CaptureDoctorRequest: Sendable {
     var captureLogs = false
     var captureNetwork = true
     var tools: [String: String] = [:]
+    var toolOverrides: [String: String] = [:]
     var outputDirectory = CaptureSessionRegistry.defaultRoot
 }
 
@@ -229,21 +230,38 @@ nonisolated struct CaptureDoctorService: Sendable {
     private func inspectTool(_ definition: ToolDefinition, request: CaptureDoctorRequest, signatureValid: Bool) async -> CaptureDoctorCheck {
         let bundled = bundledPath(definition.name)
         let bundledExists = bundled.map { FileManager.default.fileExists(atPath: $0.path) } == true
+        let override = request.toolOverrides[definition.name].flatMap { $0.trimmed.isEmpty ? nil : $0.trimmed }
         let path: URL?
         let source: CaptureDoctorSource
-        if bundledExists { path = bundled; source = .bundled }
+        if let override {
+            guard override.hasPrefix("/"), !override.contains("\0") else {
+                return CaptureDoctorCheck(id: definition.name, title: definition.title, status: .incompatible,
+                    message: "The custom runtime path must be an absolute executable path. Clear it in Advanced Runtime to use this app's bundled tools, or ask an engineer to choose a supported tool.",
+                    path: String(override.prefix(512)), source: .external)
+            }
+            let selected = URL(fileURLWithPath: override)
+            path = selected
+            source = bundled.map { selected.standardizedFileURL.resolvingSymlinksInPath() == $0.standardizedFileURL.resolvingSymlinksInPath() } == true ? .bundled : .external
+        }
+        else if bundledExists { path = bundled; source = .bundled }
         else if applicationBundle != nil && definition.repair == .reinstallApp { path = nil; source = .bundled }
         else { path = externalTool(definition.name, request: request); source = path == nil ? .none : definition.name == "simctl" ? .system : .external }
         func row(_ status: CaptureDoctorStatus, _ message: String, version: String? = nil) -> CaptureDoctorCheck {
             CaptureDoctorCheck(id: definition.name, title: definition.title, status: status, message: message,
-                version: version, path: path?.path ?? bundled?.path, source: source, repair: status == .ready ? nil : source == .bundled ? .reinstallApp : definition.repair)
+                version: version, path: path?.path ?? bundled?.path, source: source,
+                repair: status == .ready || (override != nil && source != .bundled) ? nil : source == .bundled ? .reinstallApp : definition.repair)
         }
         guard let path else {
             return row(.missing, source == .bundled ? "This app download is missing a required component. Replace it with a complete trusted copy; no separate Python or capture-engine installation is needed."
                 : "The required tool is missing. A complete Mobile Capture download is preferred; optional supported repairs are shown below.")
         }
+        if override != nil, !FileManager.default.fileExists(atPath: path.path) {
+            return row(.missing, "The custom runtime executable is missing. Clear its path in Advanced Runtime to use this app's bundled tools, or ask an engineer to choose a supported tool. Doctor did not use a bundled fallback.")
+        }
         guard source != .bundled || signatureValid else { return row(.incompatible, "The app's signed payload could not be verified. Replace the app before running this component.") }
-        guard safeExecutable(path, source: source) else { return row(.incompatible, "The executable has an unsupported location, permissions or file type. Ask an engineer to inspect it or replace the app.") }
+        guard safeExecutable(path, source: source) else { return row(.incompatible, override != nil
+            ? "The custom runtime executable has an unsupported location, permissions or file type. Clear its path in Advanced Runtime to use bundled tools, or ask an engineer to choose a supported tool. Doctor did not use a bundled fallback."
+            : "The executable has an unsupported location, permissions or file type. Ask an engineer to inspect it or replace the app.") }
         do {
             let arch = try await run("/usr/bin/lipo", ["-archs", path.path])
             guard arch.exitCode == 0, !arch.outputTruncated,

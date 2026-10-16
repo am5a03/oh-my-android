@@ -111,6 +111,59 @@ struct CaptureDoctorTests {
         #expect(!(await runner.commands).contains { $0.executable.lastPathComponent == "mitmdump" })
     }
 
+    @Test func explicitMissingRuntimeCannotBeMadeReadyByHealthyBundle() async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }; try fixture.engine(); try fixture.android()
+        let runner = DoctorFixtureRunner()
+        var request = fixture.request()
+        request.toolOverrides = ["mitmdump": fixture.external.appendingPathComponent("missing-mitmdump").path]
+        let report = await fixture.service(runner).inspect(request)
+        #expect(!report.isReady)
+        #expect(report.rows.contains { $0.id == "mitmdump" && $0.status == .missing && $0.source == .external && $0.repair == nil })
+        #expect(!(await runner.commands).contains { $0.executable.lastPathComponent == "mitmdump" })
+    }
+
+    @Test func explicitIncompatibleRuntimeTakesPrecedenceOverHealthyBundle() async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }; try fixture.engine(); try fixture.android()
+        try fixture.create("bin/mitmdump", bundled: false)
+        let runner = DoctorFixtureRunner(); await runner.configure(version: "mitmdump")
+        var request = fixture.request()
+        request.toolOverrides = ["mitmdump": fixture.external.appendingPathComponent("bin/mitmdump").path]
+        let report = await fixture.service(runner).inspect(request)
+        #expect(!report.isReady)
+        #expect(report.rows.contains { $0.id == "mitmdump" && $0.status == .incompatible && $0.source == .external })
+        #expect((await runner.commands).filter { $0.executable.lastPathComponent == "mitmdump" }.allSatisfy { $0.executable.path.hasPrefix(fixture.external.path) })
+    }
+
+    @Test(arguments: ["relative/adb", "/bin/sh"])
+    func explicitUnsupportedRuntimeIsNotExecuted(path: String) async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }; try fixture.android()
+        let runner = DoctorFixtureRunner()
+        var request = fixture.request(logs: true, network: false); request.toolOverrides = ["adb": path]
+        let report = await fixture.service(runner).inspect(request)
+        #expect(!report.isReady && report.rows.contains { $0.id == "adb" && $0.status == .incompatible })
+        #expect((await runner.commands).allSatisfy { $0.executable.lastPathComponent == "codesign" })
+    }
+
+    @Test func explicitBundledRuntimeRetainsSignatureRequirement() async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }; try fixture.android()
+        let runner = DoctorFixtureRunner(); await runner.configure(signature: true)
+        var request = fixture.request(logs: true, network: false)
+        request.toolOverrides = ["adb": fixture.bundle.appendingPathComponent("Contents/MacOS/capture-adb").path]
+        let report = await fixture.service(runner).inspect(request)
+        #expect(report.rows.contains { $0.id == "adb" && $0.source == .bundled && $0.status == .incompatible && $0.repair == .reinstallApp })
+        #expect((await runner.commands).allSatisfy { $0.executable.lastPathComponent == "codesign" })
+    }
+
+    @Test func noOverrideContinuesToPreferBundleOverExternalDiscovery() async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }; try fixture.android(); try fixture.create("bin/adb", bundled: false)
+        let runner = DoctorFixtureRunner()
+        var request = fixture.request(logs: true, network: false)
+        request.tools = ["adb": fixture.external.appendingPathComponent("bin/adb").path]
+        let report = await fixture.service(runner).inspect(request)
+        #expect(report.isReady && report.rows.contains { $0.id == "adb" && $0.source == .bundled })
+        #expect(!(await runner.commands).contains { $0.executable.path.hasPrefix(fixture.external.path) })
+    }
+
     @Test func signedPayloadFailurePreventsBundledExecution() async throws {
         let fixture = try DoctorFixture(); defer { fixture.cleanup() }
         try fixture.engine(); try fixture.android()
