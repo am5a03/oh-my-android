@@ -48,8 +48,16 @@ struct CaptureSetupReadinessTests {
         let waiting = await inspector.inspect(request)
         try require(check(waiting, "application_logs").state == .waitingForAppActivity, "idle scoped collector is waiting, not verified or failed")
         request.observations?.certificateRejections = 3
+        let mixed = await inspector.inspect(request)
+        try require(check(mixed, "https").state == .verified && mixed.prerequisitesReady,
+                    "fresh exact-nonce browser proof remains verified despite unrelated certificate rejection counts")
+        try require(check(mixed, "other_certificate_rejections").code == "other_clients_rejected_certificate"
+                    && !check(mixed, "other_certificate_rejections").isPrerequisite,
+                    "other client certificate failures stay disclosed as a non-prerequisite diagnostic")
+        request.observations?.httpsResponseNonce = nil
         let rejected = await inspector.inspect(request)
-        try require(check(rejected, "https").code == "certificate_rejected", "certificate rejections have actionable distinct guidance")
+        try require(check(rejected, "https").code == "certificate_rejected" && check(rejected, "https").state == .actionNeeded,
+                    "without exact-nonce HTTPS proof, certificate rejections retain actionable trust guidance")
         request.observations?.certificateRejections = 0
         request.observations = .init(identityFingerprint: baseline.identity.fingerprint, sessionID: "different-session",
             sessionStartedAt: inspector.now(), observedAt: inspector.now(), httpsResponseNonce: nonce,

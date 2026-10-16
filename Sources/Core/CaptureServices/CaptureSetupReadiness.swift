@@ -290,7 +290,7 @@ nonisolated struct CaptureSetupInspector: Sendable {
                 routing ? (transport ? "device_transport_nonce_observed" : "device_action_user_confirmed") : "device_route_unverified",
                 routing ? (transport ? .observedDeviceTraffic : .userReported) : .unknown,
                 routing ? [] : [.runCheck])
-            if fresh, observed?.certificateRejections ?? 0 > 0 {
+            if !https, fresh, observed?.certificateRejections ?? 0 > 0 {
                 append("https", .actionNeeded, "Check HTTPS Trust", "A client rejected this capture certificate. Install/fully trust the current public certificate; if the selected app still rejects it, ask its engineer about debug trust or pinning.", "certificate_rejected", .observedDeviceTraffic, [.installCertificate, .trustCertificate, .askEngineer])
             } else {
                 append("https", https ? .verified : .unverified, "Basic Browser HTTPS",
@@ -298,6 +298,11 @@ nonisolated struct CaptureSetupInspector: Sendable {
                         : "HTTPS trust has not been demonstrated by a fresh synthetic response. Installing a profile or acknowledging instructions is not proof.",
                     https ? "browser_https_nonce_verified" : "https_unverified", https ? .observedHTTPSExchange : .unknown,
                     https ? [] : [.runCheck, .trustCertificate])
+            }
+            if https, let rejected = observed?.certificateRejections, rejected > 0 {
+                append("other_certificate_rejections", .actionNeeded, "Other HTTPS Connections Need Attention",
+                    "The browser connection check succeeded. \(rejected) other connection(s) rejected the capture certificate; their app or SDK may need engineer help. This does not invalidate the tested browser connection or identify which app sent those connections.",
+                    "other_clients_rejected_certificate", .observedDeviceTraffic, [.askEngineer])
             }
         }
         if request.captureLogs {
