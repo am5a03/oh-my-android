@@ -1,10 +1,15 @@
 # Guided capture setup implementation
 
+This report describes the existing task-oriented implementation. The user has
+since narrowed the product to first-run phone preparation followed by the normal
+timeline. [The revised first-run setup plan](CAPTURE-SETUP-PLAN.md) supersedes that
+earlier UX direction; its simplification has not yet been implemented.
+
 Mobile Capture now has an optional **Set Up Capture** workspace for selecting a
 task, connecting a phone, preparing its capture path, checking evidence and
 recording a reproduction. The existing shared timeline and saved-session viewer
-remain accessible without onboarding. This implements the software flow from
-[the setup plan](CAPTURE-SETUP-PLAN.md); physical-device and fresh-user acceptance
+remain accessible without onboarding. This implements the previous setup plan;
+physical-device and fresh-user acceptance
 are separate from the offline validation below.
 
 ## Using the assistant
