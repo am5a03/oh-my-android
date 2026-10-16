@@ -29,7 +29,8 @@ as an inline **Finish Setup** action, rather than a repeated launch interruption
 
 Detect the phone/platform automatically. If several phones are connected, ask
 which one to prepare; never change devices during a capture. Check embedded tools
-automatically and explain any broken installation with a repair/reinstall action.
+automatically through Doctor and explain any broken installation with a
+repair/reinstall action.
 
 Show only the current unresolved phone instruction: Android USB debugging and
 computer authorization, or iPhone unlock/computer trust. Recheck connection
@@ -101,6 +102,54 @@ For physical iPhone, keep a concise tunnel-on/off instruction beside Start/Stop.
 Profile import and certificate trust are first-use steps; toggling the tunnel
 remains a per-recording action in v1.
 
+## Doctor: check and repair
+
+Add **Doctor…** to the Capture menu and the first-run setup's **Check Setup**
+action. It runs the same checks as setup and shows a small list with **Ready**,
+**Needs Action** or **Missing / Incompatible**, a short explanation and a relevant
+**Fix** or **Show Instructions** action. Keep detailed paths/output in a disclosure
+and the local setup report. Ordinary users should not need to interpret commands.
+
+Check the components needed for the selected platform and sources: bundled
+capture engine/runtime, ADB or iPhone USB tools, compatible versions/architecture,
+writable storage/disk space, phone access and capture configuration. Tools for
+an unused platform are not a blocker. Evaluate certificate/profile identity and
+connection evidence separately; executable presence alone is not successful
+HTTPS capture. A live HTTPS check remains an explicit action through the host.
+
+Checking is read only. **Fix Missing Components** previews the proposed installs
+and then performs the selected repairs, with progress, useful failure/retry
+messages and a post-install compatibility check. Phone trust, certificate approval
+and VPN prompts continue through guided user actions.
+
+Dependency source policy:
+
+1. Prefer the tested tools already bundled in the signed app. Python comes with
+   the capture engine; do not add a separate Python installation for this route.
+2. For a missing/damaged bundled payload, repair or replace the signed app package.
+   Do not patch files inside the sealed app or disable macOS protections.
+3. Offer **Install with Homebrew…** as an optional repair/development route for
+   supported external components. The app can run approved package installs and
+   show progress so users do not type terminal commands. First explain that this
+   installs Mac software, then verify the resulting tool versions and capability.
+4. If Homebrew is absent, make its installation a separate explicit choice with
+   its own guidance. Keep the bundled-app route available. Do not silently turn
+   Homebrew into a prerequisite for normal first use.
+
+Limit Homebrew actions to reviewed packages needed for capture; do not run broad
+upgrades, add arbitrary taps, or assume the latest installed version is compatible
+with the pinned engine. Failed installation leaves Doctor usable and exposes the
+next action. Automatic checks never start an installer or alter phone routing.
+
+Homebrew supports unattended installation, but provisioning/permissions and
+package requirements still need testing on a fresh Mac. Its documentation notes
+that building formulae from source requires Xcode Command Line Tools; binary
+bottles/casks can avoid that build requirement. Use the official
+[installation documentation](https://github.com/Homebrew/brew/blob/main/docs/Installation.md)
+and [Mac administration guidance](https://github.com/Homebrew/brew/blob/main/docs/Homebrew-for-Mac-Admins.md)
+when implementing this optional backend. Our Doctor is app-specific and also
+covers phone setup, beyond Homebrew package health.
+
 ## Remember and repair
 
 Store device identity, CA fingerprint, relevant profile identity, completed setup
@@ -150,8 +199,10 @@ Developer ID signing and notarization before an AdOps release.
 
 ## Implementation checkpoints
 
-1. **Simplify navigation:** remove task-oriented entry/screens, stop remembered-plan
-   restoration, default to timeline, preserve optional setup and old evidence.
+1. **Simplify navigation and add Doctor:** remove task-oriented entry/screens,
+   stop remembered-plan restoration, default to timeline, preserve optional setup
+   and old evidence. Reuse readiness checks in Doctor and model explicit repair
+   actions, with bundled tools preferred and an optional Homebrew backend.
 2. **Android first-run setup:** connect, copy public CA and restore routing, guide
    installation, run network-only check and remember device progress.
 3. **iPhone first-run setup:** simplify QR/profile/certificate/full-trust guidance,
@@ -167,6 +218,10 @@ changes the plan/documentation only; the current app UI is unchanged.
 ## Acceptance criteria
 
 - Supported fresh Macs need one app download and no separate capture dependencies.
+- Doctor checks relevant dependencies, reports versions/problems and provides
+  explicit repair actions with progress and post-install verification. Checking
+  alone never installs software; optional Homebrew repair does not silently
+  upgrade unrelated software or become the default installation prerequisite.
 - Phone certificate installation/full-trust guidance is clear and distinguishable
   from an older same-named CA.
 - Normal use needs no capture-plan file or reproduction checklist.
