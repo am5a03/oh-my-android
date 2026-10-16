@@ -32,6 +32,16 @@ struct CaptureDoctorView: View {
                         }
                     }.disabled(doctor.hasOperation || store.isBusy)
                 }
+                if store.selectedDevice == nil {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Picker("Device Type", selection: Binding(get: { doctor.deviceType }, set: { doctor.selectDeviceType($0, owner: store) })) {
+                            ForEach(CaptureDoctorStore.DeviceType.allCases) { type in Text(type.title).tag(type) }
+                        }.frame(maxWidth: 320)
+                            .disabled(doctor.hasOperation || store.hasActiveCapture || store.isBusy)
+                        Text("Check tools for a phone that is not detected yet. This does not select or connect a capture device.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                }
                 if doctor.isChecking || doctor.isPreparingPreview {
                     HStack {
                         ProgressView().controlSize(.small)

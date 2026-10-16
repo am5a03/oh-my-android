@@ -5,6 +5,21 @@ import Observation
 @MainActor
 @Observable
 final class CaptureDoctorStore {
+    enum DeviceType: String, CaseIterable, Identifiable {
+        case automatic, android, iphone, simulator
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .automatic: "Automatic"
+            case .android: "Android"
+            case .iphone: "iPhone"
+            case .simulator: "iOS Simulator"
+            }
+        }
+        var platform: String? { self == .automatic ? nil : rawValue }
+    }
+
+    private(set) var deviceType = DeviceType.automatic
     private(set) var report: CaptureDoctorReport?
     private(set) var preview: CaptureDoctorRepairPreview?
     private(set) var selectedRepair: CaptureDoctorRepair?
@@ -27,8 +42,17 @@ final class CaptureDoctorStore {
 
     var hasOperation: Bool { isChecking || isPreparingPreview || isRepairing }
 
+    func selectDeviceType(_ type: DeviceType, owner: CaptureStore) {
+        guard owner.selectedDevice == nil, !owner.hasActiveCapture, !owner.isBusy, !hasOperation else { return }
+        guard deviceType != type else { return }
+        dismissPreview()
+        deviceType = type
+        report = nil; reportConfiguration = nil
+        error = nil; notice = nil
+    }
+
     func configurationKey(_ owner: CaptureStore) -> String {
-        [owner.selectedDeviceID, owner.selectedDevice?.platform ?? "", String(owner.isSetupPresented),
+        [owner.selectedDeviceID, owner.selectedDevice?.platform ?? deviceType.rawValue, String(owner.isSetupPresented),
          String(owner.isSetupPresented ? false : owner.captureLogs),
          String(owner.isSetupPresented ? true : owner.captureNetwork), owner.outputRoot.path,
          owner.networkService, owner.iphoneEndpointHost, owner.adbPath, owner.mitmdumpPath,
@@ -136,7 +160,7 @@ final class CaptureDoctorStore {
 
     private func request(_ owner: CaptureStore) -> CaptureDoctorRequest {
         let overrides = ["adb": owner.adbPath, "mitmdump": owner.mitmdumpPath].filter { !$0.value.isEmpty }
-        return CaptureDoctorRequest(platform: owner.selectedDevice?.platform, captureLogs: owner.isSetupPresented ? false : owner.captureLogs,
+        return CaptureDoctorRequest(platform: owner.selectedDevice?.platform ?? deviceType.platform, captureLogs: owner.isSetupPresented ? false : owner.captureLogs,
             captureNetwork: owner.isSetupPresented ? true : owner.captureNetwork, tools: owner.tools.compactMapValues { $0 }, toolOverrides: overrides,
             outputDirectory: owner.outputRoot)
     }
