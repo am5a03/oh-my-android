@@ -3,15 +3,9 @@ import SwiftUI
 
 struct CaptureView: View {
     @Bindable var store: CaptureStore
-    @State private var showCaptureSettings = true
+    @State private var showCaptureDetails = true
     @State private var showRuntimeSettings = false
     @State private var showCaptureWarnings = false
-    @State private var savedNoticeHeight: CGFloat = 0
-    @State private var headerContentHeight: CGFloat = 0
-    @State private var recoveryNoticeHeight: CGFloat = 32
-    @State private var timelineHeaderHeight: CGFloat = 130
-    @State private var markerComposerHeight: CGFloat = 84
-    @State private var footerHeight: CGFloat = 44
     private let minimumEventPaneHeight: CGFloat = 180
 
     var body: some View {
@@ -21,31 +15,15 @@ struct CaptureView: View {
             } else if store.isSetupPresented {
                 CaptureSetupView(store: store, setup: store.setup)
             } else {
-                GeometryReader { geometry in
+                CaptureWorkspaceLayout(detailsExpanded: showCaptureDetails) {
+                    captureHeader
+                    captureDetails
+                    timeline
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     VStack(spacing: 0) {
-                        if let notice = store.externalRequestNotice {
-                            HStack(alignment: .top, spacing: 12) {
-                                Label(notice, systemImage: "info.circle").frame(maxWidth: .infinity, alignment: .leading)
-                                Button("Dismiss") { store.dismissExternalRequestNotice() }
-                            }
-                            .font(.callout).padding(12)
-                            Divider()
-                        }
-                        if let session = savedSession {
-                            savedCaptureNotice(session)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { savedNoticeHeight = $0 }
-                            Divider()
-                        }
-                        captureHeader(maximumHeight: headerMaximumHeight(available: geometry.size.height))
-                        Divider()
-                        timeline
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .layoutPriority(1)
                         Divider()
                         footer
                             .fixedSize(horizontal: false, vertical: true)
-                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
                     }
                 }
             }
@@ -126,13 +104,6 @@ struct CaptureView: View {
         }
     }
 
-    private func headerMaximumHeight(available height: CGFloat) -> CGFloat {
-        // Expanded prerequisites/warnings yield space before the evidence pane does.
-        let reserved = minimumEventPaneHeight + timelineHeaderHeight + markerComposerHeight + footerHeight + 2
-            + (savedSession == nil ? 0 : savedNoticeHeight + 1)
-        return max(0, min(360, min(height * 0.4, height - reserved)))
-    }
-
     private var savedSession: CaptureSession? {
         guard !store.isStarting, !store.isStopping, let session = store.session,
               !session.isActive, !session.needsRoutingRecovery, session.packagePath != nil else { return nil }
@@ -154,7 +125,7 @@ struct CaptureView: View {
                 }
             }
             if hasWarnings {
-                captureWarnings(session, maximumHeight: 110)
+                captureWarnings(session)
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
@@ -190,40 +161,110 @@ struct CaptureView: View {
         }
     }
 
-    private func captureHeader(maximumHeight: CGFloat) -> some View {
-        let recoveryHeight = store.session?.routingRestored == false ? recoveryNoticeHeight : 0
-        let availableForContent = max(0, maximumHeight - recoveryHeight)
-        let contentHeight = headerContentHeight > 0 ? min(headerContentHeight, availableForContent) : availableForContent
-        return VStack(spacing: 0) {
+    private var captureHeader: some View {
+        VStack(spacing: 0) {
+            DisclosureGroup(isExpanded: captureDetailsBinding) {
+                EmptyView()
+            } label: {
+                HStack(spacing: 12) {
+                    Text("Capture Details").font(.headline).fixedSize()
+                    Text(captureDetailsSummary)
+                        .font(.callout).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 0)
+                    if store.error != nil || !(store.session?.warnings.isEmpty ?? true) {
+                        Label(captureAttentionSummary, systemImage: "exclamationmark.triangle")
+                            .font(.callout).foregroundStyle(store.error == nil ? Color.orange : Color.red)
+                            .fixedSize()
+                    }
+                }
+                .help(showCaptureDetails
+                      ? "Hide capture settings, notices and session details to give the timeline more room."
+                      : "Show capture settings, notices and session details. \(captureDetailsSummary)")
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
             if store.session?.routingRestored == false {
                 notice("Connection needs recovery. Choose Restore Connection & Save before disconnecting the device.", symbol: "network.slash", color: .red)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { recoveryNoticeHeight = $0 }
+                ForEach(Array((store.session?.warnings ?? []).filter { $0.hasPrefix("Routing recovery still required:") }.enumerated()), id: \.offset) { _, warning in
+                    notice(warning, symbol: "exclamationmark.triangle.fill", color: .red)
+                }
             }
-            ScrollView(.vertical) {
-                headerContent
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerContentHeight = $0 }
+            if store.selectedDevice?.platform == "iphone", store.captureNetwork {
+                Text(store.session?.isActive == true
+                     ? "Recording on Mac. Turn on Mobile Capture in WireGuard on iPhone. Turn it off before Stop & Save."
+                     : "Start Capture on Mac, then turn on Mobile Capture in WireGuard on iPhone. Turn the tunnel off before Stop & Save.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.bottom, 10)
             }
-            .scrollIndicators(.visible)
-            .scrollBounceBehavior(.basedOnSize)
-            .frame(height: contentHeight)
-            .accessibilityLabel("Capture setup, status and warnings")
+            Divider()
         }
-        .frame(height: min(maximumHeight, recoveryHeight + contentHeight), alignment: .top)
+        .background(.bar)
+    }
+
+    private var captureDetails: some View {
+        ScrollView(.vertical) {
+            headerContent
+        }
+        .scrollIndicators(.visible)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(minHeight: 0, maxHeight: .infinity)
+        .clipped()
+        .disabled(!showCaptureDetails)
+        .allowsHitTesting(showCaptureDetails)
+        .accessibilityHidden(!showCaptureDetails)
+        .accessibilityLabel("Capture settings, notices and session details")
+        .background(.bar)
+    }
+
+    private var captureDetailsBinding: Binding<Bool> {
+        Binding(get: { showCaptureDetails }, set: { expanded in
+            // Resize the workspace once. Animating a disclosure's descendants repeatedly reflows
+            // the native table and inspector; an immediate change also respects Reduce Motion.
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { showCaptureDetails = expanded }
+        })
+    }
+
+    private var captureDetailsSummary: String {
+        guard let session = store.session else { return "\(phaseTitle) · \(captureSettingsSummary)" }
+        var parts = [phaseTitle, session.deviceName]
+        if let app = session.context?.value(for: "log_scope")?.value(for: "application_id")?.stringValue, !app.isEmpty {
+            parts.append(app)
+        }
+        let sources = [("logs", "Device Logs"), ("network", "Network")].compactMap { source, title in
+            session.sources[source].flatMap { $0 == "not_selected" ? nil : title }
+        }
+        if !sources.isEmpty { parts.append(sources.joined(separator: " + ")) }
+        return parts.joined(separator: " · ")
+    }
+
+    private var captureAttentionSummary: String {
+        if store.error != nil { return "Needs Attention" }
+        let warningCount = store.session?.warnings.count ?? 0
+        return "\(warningCount) \(warningCount == 1 ? "Warning" : "Warnings")"
     }
 
     private var headerContent: some View {
         VStack(spacing: 0) {
-            captureSettings
+            if let notice = store.externalRequestNotice {
+                HStack(alignment: .top, spacing: 12) {
+                    Label(notice, systemImage: "info.circle").frame(maxWidth: .infinity, alignment: .leading)
+                    Button("Dismiss") { store.dismissExternalRequestNotice() }
+                }
+                .font(.callout).padding(12)
+                Divider()
+            }
+            if let session = savedSession {
+                savedCaptureNotice(session)
+                Divider()
+            }
+            setup.padding(16)
             Divider()
             sessionStatus
             if let error = store.error { notice(error, symbol: "exclamationmark.triangle.fill", color: .red) }
             if let session = store.session {
-                if session.routingRestored == false {
-                    ForEach(Array(session.warnings.filter { $0.hasPrefix("Routing recovery still required:") }.enumerated()), id: \.offset) { _, warning in
-                        notice(warning, symbol: "exclamationmark.triangle.fill", color: .red)
-                    }
-                }
                 if session.needsPackageRetry, !store.hasActiveCapture {
                     notice("The ZIP is not available. Use Retry Save to package the existing capture evidence.", symbol: "archivebox", color: .orange)
                 }
@@ -290,18 +331,11 @@ struct CaptureView: View {
     }
 
     @ViewBuilder
-    private func captureWarnings(_ session: CaptureSession, maximumHeight: CGFloat? = nil) -> some View {
+    private func captureWarnings(_ session: CaptureSession) -> some View {
         let warnings = session.warnings.filter { session.routingRestored != false || !$0.hasPrefix("Routing recovery still required:") }
         if !warnings.isEmpty {
             DisclosureGroup(isExpanded: $showCaptureWarnings) {
-                Group {
-                    if let maximumHeight {
-                        ScrollView(.vertical) { captureWarningDetails(session, warnings: warnings) }
-                            .frame(height: maximumHeight)
-                    } else {
-                        captureWarningDetails(session, warnings: warnings)
-                    }
-                }.padding(.top, 8)
+                captureWarningDetails(session, warnings: warnings).padding(.top, 8)
             } label: {
                 Label("\(warnings.count) Capture \(warnings.count == 1 ? "Warning" : "Warnings")", systemImage: "exclamationmark.triangle")
             }
@@ -322,36 +356,6 @@ struct CaptureView: View {
                     .foregroundStyle(.secondary)
             }
         }
-    }
-
-    private var captureSettings: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            DisclosureGroup(isExpanded: $showCaptureSettings) {
-                setup.padding(.top, 12)
-            } label: {
-                HStack(spacing: 12) {
-                    Text("Capture Settings").font(.headline).fixedSize()
-                    if !showCaptureSettings {
-                        Text(captureSettingsSummary)
-                            .font(.callout).foregroundStyle(.secondary)
-                            .lineLimit(1).truncationMode(.middle)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .help(showCaptureSettings
-                      ? "Hide device and capture settings to give the timeline more room."
-                      : "Show device and capture settings. \(captureSettingsSummary)")
-            }
-            .padding(.horizontal, 16).padding(.vertical, 10)
-            if store.selectedDevice?.platform == "iphone", store.captureNetwork {
-                Text(store.session?.isActive == true
-                     ? "Recording on Mac. Turn on Mobile Capture in WireGuard on iPhone. Turn it off before Stop & Save."
-                     : "Start Capture on Mac, then turn on Mobile Capture in WireGuard on iPhone. Turn the tunnel off before Stop & Save.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 16).padding(.bottom, 10)
-            }
-        }
-        .background(.bar)
     }
 
     private var captureSettingsSummary: String {
@@ -604,7 +608,6 @@ struct CaptureView: View {
         VStack(alignment: .leading, spacing: 0) {
             timelineHeader
                 .fixedSize(horizontal: false, vertical: true)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { timelineHeaderHeight = $0 }
             GeometryReader { pane in
                 HSplitView {
                     eventList.frame(minWidth: 460, maxHeight: .infinity)
@@ -639,7 +642,6 @@ struct CaptureView: View {
             }
             .padding(12)
             .fixedSize(horizontal: false, vertical: true)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { markerComposerHeight = $0 }
         }
     }
 
@@ -810,5 +812,39 @@ struct CaptureView: View {
         .font(.caption)
         .padding(.horizontal, 16).padding(.vertical, 7)
         .background(color.opacity(0.08))
+    }
+}
+
+/// Allocates the upper details and the evidence workspace together, without publishing measured
+/// heights back into view state. Long details scroll while the timeline keeps its minimum pane size.
+private struct CaptureWorkspaceLayout: Layout {
+    let detailsExpanded: Bool
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions(by: CGSize(width: 960, height: 680))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 4 else { return }
+        let width = bounds.width
+        let minimumProposal = ProposedViewSize(width: width, height: 0)
+        let headerHeight = subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+        let timelineMinimum = subviews[2].sizeThatFits(minimumProposal).height
+        let footerHeight = subviews[3].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+        let availableForDetails = max(0, bounds.height - headerHeight - timelineMinimum - footerHeight)
+        let preferredDetailsHeight = max(0, min(360, bounds.height * 0.4) - headerHeight)
+        // Deliberately never measure the scrolling details. Expanding a warning or runtime
+        // disclosure changes its document height, not the timeline's allocated position.
+        let detailsHeight = detailsExpanded ? min(preferredDetailsHeight, availableForDetails) : 0
+        let timelineHeight = max(timelineMinimum, bounds.height - headerHeight - detailsHeight - footerHeight)
+
+        subviews[0].place(at: bounds.origin, anchor: .topLeading,
+            proposal: ProposedViewSize(width: width, height: headerHeight))
+        subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + headerHeight), anchor: .topLeading,
+            proposal: ProposedViewSize(width: width, height: detailsHeight))
+        subviews[2].place(at: CGPoint(x: bounds.minX, y: bounds.minY + headerHeight + detailsHeight), anchor: .topLeading,
+            proposal: ProposedViewSize(width: width, height: timelineHeight))
+        subviews[3].place(at: CGPoint(x: bounds.minX, y: bounds.minY + headerHeight + detailsHeight + timelineHeight), anchor: .topLeading,
+            proposal: ProposedViewSize(width: width, height: footerHeight))
     }
 }
