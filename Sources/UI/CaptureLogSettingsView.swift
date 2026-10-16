@@ -4,18 +4,22 @@ import SwiftUI
 struct CaptureLogSettingsView: View {
     @Bindable var store: CaptureStore
     @State private var showAdvanced = false
+    @State private var appSearch = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if store.logScopeMode == .app {
+                TextField("Find an installed app", text: $appSearch)
+                    .textFieldStyle(.roundedBorder).frame(maxWidth: 560)
+                    .accessibilityLabel("Find Installed App by Name or Identifier")
                 HStack(spacing: 12) {
                     Picker("Application", selection: $store.targetApp) {
                         Text("Choose an installed app…").tag("")
-                        ForEach(store.applications) { app in
+                        ForEach(filteredApplications) { app in
                             Text(app.name == app.id ? app.id : "\(app.name) · \(app.id)").tag(app.id)
                         }
-                        if !store.targetApp.isEmpty, store.selectedApplication == nil {
-                            Text(store.targetApp).tag(store.targetApp)
+                        if !store.targetApp.isEmpty, !filteredApplications.contains(where: { $0.id == store.targetApp }) {
+                            Text(store.selectedApplication?.name ?? store.targetApp).tag(store.targetApp)
                         }
                     }
                     .frame(maxWidth: 560)
@@ -64,6 +68,13 @@ struct CaptureLogSettingsView: View {
             .font(.caption)
         }
         .disabled(store.hasActiveCapture || store.isBusy)
+    }
+
+    private var filteredApplications: [CaptureLogApplication] {
+        let query = appSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return store.applications.filter {
+            query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) || $0.id.localizedCaseInsensitiveContains(query)
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     private func limit(_ unit: String, value: Binding<Int>) -> some View {

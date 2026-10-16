@@ -89,7 +89,7 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     private enum Action: Int {
         case openSession = 1, start, stop, export, showZIP, showCertificate
         case pauseDisplay, followLatest, jumpToLatest, clearView, fullSession, wrapLines, older, newer
-        case setup, exportSetupReport
+        case setup, doctor, exportSetupReport
     }
 
     init(target: CaptureCommandTarget) {
@@ -98,7 +98,8 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         menu.delegate = self
         menu.autoenablesItems = true
         add("Open Session…", action: .openSession)
-        add("Set Up Capture…", action: .setup)
+        add("Device Setup…", action: .setup)
+        add("Doctor…", action: .doctor)
         add("Export Setup Report…", action: .exportSetupReport)
         menu.addItem(.separator())
         add("Start Capture", action: .start)
@@ -164,7 +165,8 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
             return false
         }
         switch action {
-        case .setup: return !store.isBusy
+        case .setup: return !store.isBusy && !store.doctor.isRepairing
+        case .doctor: return !store.isBusy && !store.hasActiveCapture && !store.doctor.isRepairing
         case .exportSetupReport: return store.hasSetupReport
         case .openSession: return !store.isBusy && !store.hasActiveCapture
         case .start: return store.canStart
@@ -195,6 +197,7 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         guard validateMenuItem(sender), let action = Action(rawValue: sender.tag), let store = target.captureStore else { return }
         switch action {
         case .setup: store.showSetup()
+        case .doctor: store.showDoctor()
         case .exportSetupReport: Task { await store.exportSetupReport() }
         case .openSession: Task { await store.openSession() }
         case .start: Task { await store.start() }

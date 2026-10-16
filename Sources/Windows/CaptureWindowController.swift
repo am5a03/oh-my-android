@@ -16,12 +16,21 @@ final class CaptureWindowController: NSObject, NSWindowDelegate {
         // Keep a single-line title so AppKit centers it with the toolbar controls.
         tool.present(subtitle: "")
         CaptureCommandMenu.shared.install()
-        if discoverDevices, !store.didDiscover, !store.hasActiveCapture { Task { await store.refreshDevices() } }
+        if discoverDevices, !store.hasActiveCapture {
+            Task {
+                if !store.didDiscover { await store.refreshDevices(includeApplications: false) }
+                store.setup.offerFirstRunIfNeeded(store)
+            }
+        }
     }
 
     func stopBeforeQuit() async { await store.stopBeforeQuit() }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if store.doctor.isRepairing {
+            store.isDoctorPresented = true
+            return false
+        }
         guard store.setup.hasLiveCheck else { return true }
         store.isSetupPresented = true
         store.setup.noteWindowCloseRequested()

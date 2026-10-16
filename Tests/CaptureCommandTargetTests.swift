@@ -6,6 +6,34 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct CaptureCommandTargetTests {
+    @Test func setupAndDoctorAreDiscoverableWithoutAnEngineerTask() throws {
+        let windows = WindowProviders()
+        let target = CaptureCommandTarget(keyWindowProvider: { windows.key }, mainWindowProvider: { windows.main })
+        let capture = window()
+        let store = CaptureStore()
+        target.register(window: capture, store: store)
+        windows.key = capture
+        let commands = CaptureCommandMenu(target: target)
+        commands.menu.update()
+        let setup = try #require(commands.menu.items.first { $0.title == "Device Setup…" })
+        let doctor = try #require(commands.menu.items.first { $0.title == "Doctor…" })
+        #expect(setup.isEnabled)
+        #expect(doctor.isEnabled)
+        #expect(!commands.menu.items.contains { $0.title.contains("Capture Plan") })
+        store.hasActiveCapture = true
+        commands.menu.update()
+        #expect(!doctor.isEnabled)
+        store.hasActiveCapture = false
+        store.isBusy = true
+        commands.menu.update()
+        #expect(!setup.isEnabled)
+        #expect(!doctor.isEnabled)
+        store.isBusy = false
+        store.doctor.isRepairing = true
+        commands.menu.update()
+        #expect(!setup.isEnabled && !doctor.isEnabled)
+    }
+
     @Test func nativeTimelineMenuReflectsPauseFollowWrapAndPaging() throws {
         let windows = WindowProviders()
         let target = CaptureCommandTarget(keyWindowProvider: { windows.key }, mainWindowProvider: { windows.main })

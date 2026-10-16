@@ -69,11 +69,12 @@ final class MobileCaptureAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard capture.hasActiveCapture else { return .terminateNow }
+        guard capture.hasActiveCapture || capture.store.doctor.isRepairing else { return .terminateNow }
         guard !awaitingCaptureStop else { return .terminateLater }
         awaitingCaptureStop = true
         Task { @MainActor in
             await capture.stopBeforeQuit()
+            await capture.store.doctor.stopBeforeQuit()
             awaitingCaptureStop = false
             if capture.hasActiveCapture { capture.show() }
             sender.reply(toApplicationShouldTerminate: !capture.hasActiveCapture)
@@ -90,11 +91,14 @@ final class MobileCaptureAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showCapture() { capture.show() }
     @objc private func showSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 260),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 430),
                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Mobile Capture Settings"
             window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: MobileCaptureSettingsView(store: capture.store))
+            window.contentView = NSHostingView(rootView: MobileCaptureSettingsView(store: capture.store, showCapture: { [weak self] in
+                self?.settingsWindow?.orderOut(nil)
+                self?.capture.show()
+            }))
             window.center()
             settingsWindow = window
         }

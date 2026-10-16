@@ -15,6 +15,8 @@ import Observation
     var hasActiveCapture = false
     var canStart = false
     var hasSetupReport = false
+    let doctor = CaptureDoctorStore()
+    var isDoctorPresented = false
     var isLoadingTimeline = false
     var isViewPaused = false
     var followLatest = true
@@ -32,6 +34,7 @@ import Observation
     func revealPackage() {}
     func revealCaptureCertificate() {}
     func showSetup() {}
+    func showDoctor() { isDoctorPresented = true }
     func exportSetupReport() async {}
     func togglePauseView() async { isViewPaused.toggle() }
     func setFollowLatest(_ value: Bool) async { followLatest = value }
@@ -49,6 +52,7 @@ struct CaptureSession {
     var packagePath: String?
     var caCertificatePath: String?
 }
+@MainActor final class CaptureDoctorStore { var isRepairing = false }
 SWIFT
 cat > "$work/Package.swift" <<'SWIFT'
 // swift-tools-version: 6.2

@@ -5,7 +5,6 @@ struct CaptureView: View {
     @Bindable var store: CaptureStore
     @State private var showRuntimeSettings = false
     @State private var showCaptureWarnings = false
-    @State private var showIPhoneSetup = false
     @State private var savedNoticeHeight: CGFloat = 0
     @State private var headerContentHeight: CGFloat = 0
     @State private var recoveryNoticeHeight: CGFloat = 32
@@ -16,7 +15,9 @@ struct CaptureView: View {
 
     var body: some View {
         Group {
-            if store.isSetupPresented {
+            if store.isDoctorPresented {
+                CaptureDoctorView(store: store, doctor: store.doctor)
+            } else if store.isSetupPresented {
                 CaptureSetupView(store: store, setup: store.setup)
             } else {
                 GeometryReader { geometry in
@@ -49,12 +50,10 @@ struct CaptureView: View {
             }
         }
         .frame(minWidth: 960, minHeight: 680)
-        .onChange(of: store.session?.id) { showCaptureWarnings = false }
-        .sheet(isPresented: $showIPhoneSetup) {
-            if let configuration = store.iphoneTunnelConfiguration {
-                IPhoneCaptureSetupView(configuration: configuration, isRecording: store.session?.isActive == true)
-            }
+        .task(id: store.setup.configurationKey(store)) {
+            if !store.isSetupPresented, !store.isDoctorPresented { await store.setup.inspect(store) }
         }
+        .onChange(of: store.session?.id) { showCaptureWarnings = false }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button { Task { await store.openSession() } } label: {
@@ -66,11 +65,7 @@ struct CaptureView: View {
                     .accessibilityHint(openSessionHelp)
             }
             ToolbarItemGroup(placement: .automatic) {
-                if !store.isSetupPresented {
-                    Button { store.showSetup() } label: {
-                        toolbarLabel("Set Up Capture", symbol: "wand.and.stars")
-                    }
-                    .help("Choose an app, prepare a device and check the evidence before recording.")
+                if !store.isSetupPresented && !store.isDoctorPresented {
                     Button { store.exportPackage() } label: {
                         toolbarLabel("Export ZIP…", symbol: "archivebox")
                     }
@@ -106,7 +101,7 @@ struct CaptureView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                if store.isSetupPresented {
+                if store.isSetupPresented || store.isDoctorPresented {
                     EmptyView()
                 } else if store.hasActiveCapture || store.session?.needsPackageRetry == true {
                     Button { Task { await store.stop() } } label: {
@@ -157,7 +152,6 @@ struct CaptureView: View {
                     savedCaptureActions
                 }
             }
-            CaptureTaskCoverageView(session: session)
             if hasWarnings {
                 captureWarnings(session, maximumHeight: 110)
             }
@@ -258,9 +252,9 @@ struct CaptureView: View {
         if store.hasActiveCapture { return "Stop and save the current capture before starting another." }
         guard let device = store.selectedDevice else { return "Choose a connected device to start capturing." }
         if !device.isReady { return "The selected device is not ready. Unlock it, authorize the computer, then refresh devices." }
-        if device.platform == "iphone", store.captureLogs, store.toolPath("idevicesyslog") == nil { return "Install libimobiledevice for USB iPhone logs, then Refresh. Network capture can run without device logs." }
+        if device.platform == "iphone", store.captureLogs, store.toolPath("idevicesyslog") == nil { return "Open Doctor to check the iPhone logging component. Network capture can run without device logs." }
         if store.captureLogs, let issue = store.logConfigurationIssue { return issue }
-        if store.captureNetwork && device.platform == "iphone" && store.iphoneTunnelConfiguration == nil { return "Choose Set Up iPhone Capture to prepare the private WireGuard tunnel, then start recording." }
+        if store.captureNetwork && device.platform == "iphone" && store.iphoneTunnelConfiguration == nil { return "Choose Device Setup to prepare the private capture connection, then start recording." }
         if !store.captureLogs && !store.captureNetwork { return "Select Device Logs, Network Requests & Responses, or both." }
         if store.captureNetwork && device.platform == "simulator" && store.networkService.isEmpty {
             return "Choose the Mac network service used by the Simulator before starting network capture."
@@ -354,6 +348,12 @@ struct CaptureView: View {
                 Spacer()
             }
             .disabled(store.hasActiveCapture || store.isBusy)
+            if !store.hasActiveCapture, let prompt = store.setup.setupPrompt(store) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Label(prompt, systemImage: "info.circle").font(.callout).foregroundStyle(.secondary)
+                    Button("Finish Setup…") { store.showSetup() }.disabled(store.isBusy || store.doctor.isRepairing)
+                }
+            }
             if store.captureLogs { CaptureLogSettingsView(store: store) }
             if store.selectedDevice?.platform == "iphone" {
                 Text("iPhone logs use USB. Network traffic uses the private WireGuard tunnel over Wi-Fi.")
@@ -361,24 +361,16 @@ struct CaptureView: View {
             }
             if store.selectedDevice?.platform == "iphone" {
                 if store.captureLogs, store.toolPath("idevicesyslog") == nil {
-                    Text("USB logs require libimobiledevice (brew install libimobiledevice). Install it once, unlock and trust this Mac on iPhone, then Refresh.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Text("The iPhone log component needs attention. Doctor can check it and offer a repair.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Open Doctor…") { store.showDoctor() }.disabled(store.hasActiveCapture || store.isBusy)
+                    }
                 }
                 if store.captureNetwork {
-                    HStack(spacing: 12) {
-                        TextField("Mac Wi-Fi address", text: $store.iphoneEndpointHost)
-                            .textFieldStyle(.roundedBorder).frame(maxWidth: 230)
-                            .disabled(store.hasActiveCapture || store.isBusy)
-                            .help("A Mac LAN address reachable from the iPhone's Wi-Fi network. Update and reimport the profile if it changes.")
-                        Button("Set Up iPhone Capture…", systemImage: "qrcode") {
-                            if store.prepareIPhoneSetup() { showIPhoneSetup = true }
-                        }
-                        .disabled(store.isBusy)
-                        Spacer()
-                    }
                     Text(store.session?.isActive == true
-                         ? "Recording on Mac. Turn on Mobile Capture in WireGuard on iPhone. Turn it off before Stop & Save. For first-time HTTPS setup, open http://mitm.it in Safari and install and fully trust the capture CA."
-                         : "Set up WireGuard and the capture CA once. Start Capture on Mac, then turn the tunnel on in WireGuard on iPhone. IPv4 is captured; IPv6 may bypass it.")
+                         ? "Recording on Mac. Turn on Mobile Capture in WireGuard on iPhone. Turn it off before Stop & Save."
+                         : "Start Capture on Mac, then turn on Mobile Capture in WireGuard on iPhone. Turn the tunnel off before Stop & Save.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             } else if store.captureNetwork, store.selectedDevice?.platform == "simulator" {
@@ -395,7 +387,7 @@ struct CaptureView: View {
                 Text("Simulator capture temporarily changes this Mac service’s proxy and can include unrelated Mac or Simulator traffic. The CA checkbox authorizes importing the public capture certificate into the selected Simulator.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else if store.captureNetwork, store.selectedDevice?.platform == "android" {
-                Text("Android needs USB debugging and a test app that trusts the capture CA. Install and trust the public certificate on the device for HTTPS bodies; pinning or apps that ignore the proxy can prevent capture.")
+                Text("Use an engineer-prepared test app that trusts the capture certificate. Device Setup can guide the phone certificate installation.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             DisclosureGroup("Runtime settings & prerequisites", isExpanded: $showRuntimeSettings) {
@@ -410,6 +402,10 @@ struct CaptureView: View {
 
     private var runtimeSettings: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if store.selectedDevice?.platform == "iphone" {
+                TextField("Mac Wi-Fi Address", text: $store.iphoneEndpointHost).textFieldStyle(.roundedBorder)
+                    .help("A Mac address reachable from iPhone. After changing it, use Device Setup to update the phone’s capture profile.")
+            }
             HStack {
                 runtimeField("ADB", value: $store.adbPath, placeholder: store.toolPath("adb") ?? "Not detected")
                 runtimeField("mitmdump", value: $store.mitmdumpPath, placeholder: store.toolPath("mitmdump") ?? "Not detected")
