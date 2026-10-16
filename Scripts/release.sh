@@ -103,6 +103,9 @@ if [[ "$PRODUCT" == capture ]]; then
   if (( USB_CANDIDATE )); then
     python3 -B Scripts/bundle-iphone-usb-candidate.py smoke --app "$APP"
   fi
+  DOCTOR_OPTIONS=()
+  if (( USB_CANDIDATE )); then DOCTOR_OPTIONS+=(--iphone-usb); fi
+  bash Scripts/test-capture-doctor-bundle.sh "$APP" "${DOCTOR_OPTIONS[@]}"
 else
   Scripts/test-mcp.py "$APP/Contents/MacOS/ohmyandroid-mcp"
 fi
