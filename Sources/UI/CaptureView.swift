@@ -3,6 +3,7 @@ import SwiftUI
 
 struct CaptureView: View {
     @Bindable var store: CaptureStore
+    @State private var showCaptureSettings = true
     @State private var showRuntimeSettings = false
     @State private var showCaptureWarnings = false
     @State private var savedNoticeHeight: CGFloat = 0
@@ -213,7 +214,7 @@ struct CaptureView: View {
 
     private var headerContent: some View {
         VStack(spacing: 0) {
-            setup
+            captureSettings
             Divider()
             sessionStatus
             if let error = store.error { notice(error, symbol: "exclamationmark.triangle.fill", color: .red) }
@@ -323,6 +324,48 @@ struct CaptureView: View {
         }
     }
 
+    private var captureSettings: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            DisclosureGroup(isExpanded: $showCaptureSettings) {
+                setup.padding(.top, 12)
+            } label: {
+                HStack(spacing: 12) {
+                    Text("Capture Settings").font(.headline).fixedSize()
+                    if !showCaptureSettings {
+                        Text(captureSettingsSummary)
+                            .font(.callout).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .help(showCaptureSettings
+                  ? "Hide device and capture settings to give the timeline more room."
+                  : "Show device and capture settings. \(captureSettingsSummary)")
+            if store.selectedDevice?.platform == "iphone", store.captureNetwork {
+                Text(store.session?.isActive == true
+                     ? "Recording on Mac. Turn on Mobile Capture in WireGuard on iPhone. Turn it off before Stop & Save."
+                     : "Start Capture on Mac, then turn on Mobile Capture in WireGuard on iPhone. Turn the tunnel off before Stop & Save.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16).padding(.bottom, 10)
+            }
+        }
+        .background(.bar)
+    }
+
+    private var captureSettingsSummary: String {
+        var parts = [store.selectedDevice?.name ?? (store.selectedDeviceID.isEmpty ? "No device selected" : "Device unavailable")]
+        if store.captureLogs, store.logScopeMode == .app, !store.targetApp.isEmpty {
+            parts.append(store.selectedApplication?.name ?? store.targetApp)
+        }
+        var sources: [String] = []
+        if store.captureLogs { sources.append(store.logScopeMode == .wholeDevice ? "Whole-device logs" : "App logs") }
+        if store.captureNetwork { sources.append("Network") }
+        parts.append(sources.isEmpty ? "No sources selected" : sources.joined(separator: " + "))
+        return parts.joined(separator: " · ")
+    }
+
     private var setup: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -368,12 +411,6 @@ struct CaptureView: View {
                         Button("Open Doctor…") { store.showDoctor() }.disabled(store.hasActiveCapture || store.isBusy)
                     }
                 }
-                if store.captureNetwork {
-                    Text(store.session?.isActive == true
-                         ? "Recording on Mac. Turn on Mobile Capture in WireGuard on iPhone. Turn it off before Stop & Save."
-                         : "Start Capture on Mac, then turn on Mobile Capture in WireGuard on iPhone. Turn the tunnel off before Stop & Save.")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
             } else if store.captureNetwork, store.selectedDevice?.platform == "simulator" {
                 HStack(spacing: 16) {
                     Picker("Mac network service", selection: $store.networkService) {
@@ -397,8 +434,6 @@ struct CaptureView: View {
             .font(.caption)
             .disabled(store.hasActiveCapture || store.isBusy)
         }
-        .padding(16)
-        .background(.bar)
     }
 
     private var runtimeSettings: some View {
