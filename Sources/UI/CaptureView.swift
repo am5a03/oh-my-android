@@ -338,11 +338,11 @@ struct CaptureView: View {
                     }
                     Spacer(minLength: 0)
                 }
+                .help(showCaptureSettings
+                      ? "Hide device and capture settings to give the timeline more room."
+                      : "Show device and capture settings. \(captureSettingsSummary)")
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
-            .help(showCaptureSettings
-                  ? "Hide device and capture settings to give the timeline more room."
-                  : "Show device and capture settings. \(captureSettingsSummary)")
             if store.selectedDevice?.platform == "iphone", store.captureNetwork {
                 Text(store.session?.isActive == true
                      ? "Recording on Mac. Turn on Mobile Capture in WireGuard on iPhone. Turn it off before Stop & Save."
