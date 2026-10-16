@@ -12,11 +12,16 @@ private actor DoctorFixtureRunner: CaptureDoctorCommandRunning {
     var offeredVersion = "1.4.0"
     var installExit: Int32 = 0
     var installHook: (@Sendable () throws -> Void)? = nil
+    var engineHelpExit: Int32 = 0
+    var engineHelpError = ""
+    var engineHelpHasHeader = true
 
     func configure(version: String? = nil, capability: String? = nil, architecture: Bool = false, signature: Bool = false,
-                   offered: String = "1.4.0", installExit: Int32 = 0, installHook: (@Sendable () throws -> Void)? = nil) {
+                   offered: String = "1.4.0", installExit: Int32 = 0, installHook: (@Sendable () throws -> Void)? = nil,
+                   engineHelpExit: Int32 = 0, engineHelpError: String = "", engineHelpHasHeader: Bool = true) {
         badVersion = version; badCapability = capability; badArchitecture = architecture; badSignature = signature
         offeredVersion = offered; self.installExit = installExit; self.installHook = installHook
+        self.engineHelpExit = engineHelpExit; self.engineHelpError = engineHelpError; self.engineHelpHasHeader = engineHelpHasHeader
     }
 
     func run(_ command: CaptureDoctorCommand, progress: @escaping @Sendable (String) -> Void) async throws -> CaptureDoctorCommandResult {
@@ -46,6 +51,24 @@ private actor DoctorFixtureRunner: CaptureDoctorCommandRunning {
             }
         }
         if badCapability == name { return output("synthetic incompatible help") }
+        if name == "mitmdump", command.arguments == ["--help"] {
+            // Excerpts captured from the signed pinned 12.2.3 bundle's 10,994-byte
+            // help output, which exits 1 with an empty stderr on this release.
+            let help = """
+            usage: mitmdump [options] [filter]
+
+            positional arguments:
+              filter_args           Filter expression, equivalent to setting both the
+                                    view_filter and save_stream_filter options.
+
+            options:
+              -h, --help            show this help message and exit
+              --version             show version number and exit
+              --mode, -m MODE       The proxy server type(s) to spawn. Can be passed
+              --scripts, -s SCRIPT  Execute a script. May be passed multiple times.
+            """
+            return .init(exitCode: engineHelpExit, stdout: engineHelpHasHeader ? help : "synthetic missing header --mode --scripts", stderr: engineHelpError)
+        }
         return output("--mode --scripts reverse logcat --list --simple --udid --process list spawn")
     }
 }
@@ -99,6 +122,23 @@ struct CaptureDoctorTests {
         let calls = await runner.commands
         #expect(calls.allSatisfy { ["codesign", "lipo", "mitmdump", "capture-adb"].contains($0.executable.lastPathComponent) })
         #expect(!calls.contains { $0.arguments.contains("devices") || $0.arguments.contains("start-server") || $0.executable.lastPathComponent == "python3" })
+    }
+
+    @Test func pinnedEngineNormalHelpExitOneIsNotAComponentFailure() async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }; try fixture.engine(); try fixture.android()
+        let runner = DoctorFixtureRunner(); await runner.configure(engineHelpExit: 1)
+        let report = await fixture.service(runner).inspect(fixture.request())
+        #expect(report.isReady && report.rows.contains { $0.id == "mitmdump" && $0.status == .ready })
+    }
+
+    @Test(arguments: ["stderr", "header", "exit"])
+    func nonzeroEngineHelpStillRejectsActualErrorsAndMalformedHelp(failure: String) async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }; try fixture.engine(); try fixture.android()
+        let runner = DoctorFixtureRunner()
+        await runner.configure(engineHelpExit: failure == "exit" ? 2 : 1,
+            engineHelpError: failure == "stderr" ? "synthetic startup error" : "", engineHelpHasHeader: failure != "header")
+        let report = await fixture.service(runner).inspect(fixture.request())
+        #expect(!report.isReady && report.rows.contains { $0.id == "mitmdump" && $0.status == .incompatible })
     }
 
     @Test func missingSignedEngineNeverFallsBackToExternalOrMutatesApp() async throws {

@@ -284,7 +284,15 @@ nonisolated struct CaptureDoctorService: Sendable {
             let capabilities: String
             if let arguments = definition.capabilityArguments {
                 let help = try await runner.run(CaptureDoctorCommand(executable: path, arguments: arguments, environment: commandEnvironment), progress: { _ in })
-                guard help.exitCode == 0, !help.outputTruncated else { return row(.incompatible, "The component's local capability check failed. No phone was contacted.", version: version) }
+                // The pinned 12.2.3 executable exits 1 for a normal --help response.
+                // Admit that specific convention only after its exact version/runtime checks,
+                // with a recognizable help header and no error output. Other nonzero exits,
+                // incomplete output and missing capabilities remain failures.
+                let pinnedEngineHelp = definition.name == "mitmdump" && version == "12.2.3"
+                    && arguments == ["--help"] && help.exitCode == 1 && help.stderr.trimmed.isEmpty
+                    && help.stdout.hasPrefix("usage: mitmdump [options] [filter]\n")
+                    && help.stdout.contains("--help") && help.stdout.contains("show this help message and exit")
+                guard (help.exitCode == 0 || pinnedEngineHelp), !help.outputTruncated else { return row(.incompatible, "The component's local capability check failed. No phone was contacted.", version: version) }
                 capabilities = help.stdout + help.stderr
             } else { capabilities = text }
             guard definition.capabilities.allSatisfy(capabilities.contains) else { return row(.incompatible, "This tool does not advertise the capture capabilities this app requires.", version: version) }
