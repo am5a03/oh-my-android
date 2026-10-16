@@ -35,6 +35,10 @@ final class CaptureSetupStore {
     private(set) var browserHTTPSObserved = false
     private(set) var phoneOriginConfirmed = false
     private(set) var isExportingReport = false
+    private(set) var isPreparingCertificate = false
+    private(set) var isCertificatePreparation = false
+    private(set) var certificateWasCopied = false
+    private(set) var certificatePreparationDeviceID: String?
     @ObservationIgnored private var checkDeadline: Task<Void, Never>?
     @ObservationIgnored private var reportRevision = UUID()
     @ObservationIgnored private var checkIdentityFingerprint: String?
@@ -43,10 +47,19 @@ final class CaptureSetupStore {
     @ObservationIgnored private var rememberedPlanDefaults: UserDefaults?
     private static let rememberedPlanKey = "capture.setup.appliedPlan.v1"
 
-    var hasLiveCheck: Bool { isLaunchingCheck || checkCapture?.hasActiveCapture == true }
+    var hasLiveCheck: Bool { isLaunchingCheck || isPreparingCertificate || checkCapture?.hasActiveCapture == true }
+    var verificationCapture: CaptureStore? { isCertificatePreparation ? nil : checkCapture }
+    var certificateReadyForInstallation: Bool {
+        certificateWasCopied && isCertificatePreparation && !isPreparingCertificate && !isLaunchingCheck
+            && checkCapture?.hasActiveCapture != true && checkCapture?.session?.routingRestored == true
+    }
 
     func configurationDidChange(_ owner: CaptureStore) {
         if reportConfiguration != configurationKey(owner) { report = nil; browserHTTPSObserved = false }
+        if isCertificatePreparation, certificatePreparationDeviceID != owner.selectedDeviceID, !hasLiveCheck {
+            certificateWasCopied = false; certificatePreparationDeviceID = nil
+            notice = nil; error = nil
+        }
     }
 
     func restoreRememberedPlan(_ owner: CaptureStore, defaults: UserDefaults) {
@@ -99,7 +112,7 @@ final class CaptureSetupStore {
         reportRevision = revision
         isInspecting = true
         defer { if reportRevision == revision { isInspecting = false } }
-        let usesCheck = checkCapture?.session != nil && checkOwnerConfiguration == requestedConfiguration
+        let usesCheck = !isCertificatePreparation && checkCapture?.session != nil && checkOwnerConfiguration == requestedConfiguration
             && checkCapture?.setupContext?.plan == appliedPlan
         let subject = usesCheck ? checkCapture ?? owner : owner
         var request = CaptureSetupRequest(
@@ -130,7 +143,7 @@ final class CaptureSetupStore {
             }
         } else {
             browserHTTPSObserved = false
-            if checkCapture?.session != nil { notice = "The capture configuration changed. Run a new check for these choices." }
+            if !isCertificatePreparation, checkCapture?.session != nil { notice = "The capture configuration changed. Run a new check for these choices." }
         }
         guard reportRevision == revision else { return }
         guard configurationKey(owner) == requestedConfiguration else {
@@ -144,6 +157,7 @@ final class CaptureSetupStore {
     func startCheck(_ owner: CaptureStore) async {
         guard owner.canStart, !hasLiveCheck else { return }
         error = nil; notice = nil
+        isCertificatePreparation = false
         let check = owner.makeSetupCheck()
         check.setupContext = CaptureSessionSetupContext(purpose: .check, plan: appliedPlan,
             checks: portableChecks(owner), probeNonce: CaptureSessionSetupContext.freshProbeNonce())
@@ -179,22 +193,78 @@ final class CaptureSetupStore {
         await checkCapture.stop()
         if !checkCapture.hasActiveCapture {
             checkDeadline?.cancel(); checkDeadline = nil
-            notice = checkCapture.session?.packagePath == nil
+            if isCertificatePreparation {
+                if certificateReadyForInstallation { error = nil }
+                notice = certificateReadyForInstallation
+                    ? "The capture connection is restored. Install the copied certificate on Android at your own pace, then start the capture check."
+                    : "The capture connection is restored. Retry Prepare & Copy Certificate if the certificate was not copied."
+            } else { notice = checkCapture.session?.packagePath == nil
                 ? "Check stopped. The original evidence is retained; use Retry Save if the ZIP is unavailable."
-                : "Check saved separately. Review the observed sources below before recording the issue."
+                : "Check saved separately. Review the observed sources below before recording the issue." }
+        }
+    }
+
+    /// Certificate preparation has no phone-side deadline. It briefly uses the existing host to
+    /// create/read its stable public CA, copies it, then restores routing before installation help.
+    func prepareAndroidCertificate(_ owner: CaptureStore) async {
+        guard !owner.hasActiveCapture, !owner.isBusy, owner.selectedDevice?.platform == "android",
+              owner.selectedDevice?.isReady == true else { return }
+        error = nil; notice = nil
+        isPreparingCertificate = true
+        isCertificatePreparation = true
+        certificateWasCopied = false
+        certificatePreparationDeviceID = owner.selectedDeviceID
+        defer { isPreparingCertificate = false }
+        checkDeadline?.cancel(); checkDeadline = nil
+        checkStartedAt = nil; checkDeadlineReached = false
+        checkOwnerConfiguration = nil; checkIdentityFingerprint = nil
+        browserHTTPSObserved = false; phoneOriginConfirmed = false
+        let preparation = owner.makeSetupCheck()
+        preparation.captureLogs = false
+        preparation.captureNetwork = true
+        preparation.setupContext = CaptureSessionSetupContext(purpose: .check,
+            probeNonce: CaptureSessionSetupContext.freshProbeNonce())
+        checkCapture = preparation
+        isLaunchingCheck = true
+        await preparation.start()
+        isLaunchingCheck = false
+        guard preparation.session?.isActive == true || preparation.session?.needsRoutingRecovery == true else {
+            error = preparation.error ?? "Certificate preparation could not start. Check the device connection and Mac tools."
+            return
+        }
+        do {
+            preparation.markerText = "Certificate preparation only. No reproduction or app-log verification was requested."
+            await preparation.addMarker()
+            try await preparation.transferSetupCertificate()
+            certificateWasCopied = true
+        } catch { self.error = error.localizedDescription }
+        await preparation.stop()
+        if preparation.hasActiveCapture {
+            error = "The preparation connection still needs recovery. Choose Restore Connection before installing the certificate or starting a check."
+            notice = nil
+            return
+        }
+        if certificateWasCopied, preparation.session?.routingRestored == true {
+            notice = "Certificate copied; the capture connection has been restored. In Android Settings, search Install a certificate → CA certificate, choose the newest mobile-capture-ca file in Downloads and complete the phone confirmation. Take your time; no capture is running. Then continue to the capture check."
+        } else {
+            notice = "The capture connection has been restored. The public certificate was not copied; retry preparation after resolving the error."
         }
     }
 
     func dismiss(_ owner: CaptureStore) {
         guard !hasLiveCheck else {
-            notice = "Finish the capture check before leaving setup. On iPhone, turn the capture tunnel off before Stop Check & Save."
+            notice = isCertificatePreparation
+                ? "Finish restoring the certificate preparation connection before leaving setup."
+                : "Finish the capture check before leaving setup. On iPhone, turn the capture tunnel off before Stop Check & Save."
             return
         }
         owner.isSetupPresented = false
     }
 
     func noteWindowCloseRequested() {
-        notice = "Finish the active capture check before closing this window. Your existing session is still available in the timeline."
+        notice = isCertificatePreparation
+            ? "Finish restoring the certificate preparation connection before closing this window."
+            : "Finish the active capture check before closing this window. Your existing session is still available in the timeline."
     }
 
     func confirmPhoneOrigin(_ owner: CaptureStore) async {
@@ -314,7 +384,7 @@ final class CaptureSetupStore {
         guard let plan = appliedPlan else { return [] }
         let required = [("Device logs", plan.sources.logs), ("Decoded HTTPS Requests & Responses", plan.sources.network)]
             .compactMap { $0.1 == .required ? $0.0 : nil }
-        guard checkOwnerConfiguration == configurationKey(owner), checkCapture?.setupContext?.plan == plan,
+        guard !isCertificatePreparation, checkOwnerConfiguration == configurationKey(owner), checkCapture?.setupContext?.plan == plan,
               let session = checkCapture?.session else { return required }
         let scope = session.context?.value(for: "log_scope")
         let appLogs = scope?.value(for: "mode")?.stringValue == "app"

@@ -108,10 +108,12 @@ final class CaptureStore {
     @ObservationIgnored private var timelineOperation: Task<Void, Never>?
     @ObservationIgnored private var timelineOperationID = UUID()
 
-    init(hostExecutable: URL? = nil, rememberedPlanDefaults: UserDefaults? = nil) {
+    init(hostExecutable: URL? = nil, rememberedPlanDefaults: UserDefaults? = nil,
+         initialDiscovery: NativeCaptureDiscoveryResult? = nil, outputRoot: URL? = nil) {
         self.hostExecutable = hostExecutable
-        outputRoot = UserDefaults.standard.string(forKey: "capture.sessionsRoot").map { URL(fileURLWithPath: $0, isDirectory: true) }
+        self.outputRoot = outputRoot ?? UserDefaults.standard.string(forKey: "capture.sessionsRoot").map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? CaptureSessionRegistry.defaultRoot
+        if let initialDiscovery { acceptDiscovery(initialDiscovery) }
         if let rememberedPlanDefaults { setup.restoreRememberedPlan(self, defaults: rememberedPlanDefaults) }
     }
 
@@ -128,9 +130,9 @@ final class CaptureStore {
     }
     var hasOwnActiveCapture: Bool { isStarting || session?.isActive == true || session?.needsRoutingRecovery == true }
     /// A guided check uses the same host and lease, and belongs to this window's lifecycle.
-    var hasActiveCapture: Bool { hasOwnActiveCapture || setup.isLaunchingCheck || setup.checkCapture?.hasActiveCapture == true }
+    var hasActiveCapture: Bool { hasOwnActiveCapture || setup.isLaunchingCheck || setup.isPreparingCertificate || setup.checkCapture?.hasActiveCapture == true }
     var operationSession: CaptureSession? { setup.checkCapture?.hasActiveCapture == true ? setup.checkCapture?.session : session }
-    var isOperationBusy: Bool { isBusy || setup.isLaunchingCheck || (setup.checkCapture?.hasActiveCapture == true && setup.checkCapture?.isBusy == true) }
+    var isOperationBusy: Bool { isBusy || setup.isLaunchingCheck || setup.isPreparingCertificate || (setup.checkCapture?.hasActiveCapture == true && setup.checkCapture?.isBusy == true) }
     var canStart: Bool {
         !isBusy && !hasActiveCapture && selectedDevice?.isReady == true && (captureLogs || captureNetwork)
             && !(captureNetwork && selectedDevice?.platform == "simulator" && networkService.isEmpty)
@@ -266,17 +268,20 @@ final class CaptureStore {
         do {
             let discovery = try await NativeCaptureDiscovery().discover(configuration: .init(
                 adbPath: nonempty(adbPath), mitmdumpPath: nonempty(mitmdumpPath)))
-            devices = discovery.devices.map { CaptureDevice(id: $0.id, name: $0.name, platform: $0.platform, state: $0.state) }
-            tools = discovery.tools.mapValues { Optional($0) }
-            networkServices = discovery.networkServices
-            didDiscover = true
-            discoveryCheckedAt = Date()
+            acceptDiscovery(discovery)
             if !networkServices.contains(networkService) { networkService = "" }
             if !discovery.warnings.isEmpty { error = discovery.warnings.joined(separator: "\n") }
             loadIPhoneSetup()
             if includeApplications { await refreshApplications() }
             else if selectedDevice?.isReady != true { applications = [] }
         } catch { recordFailure(error) }
+    }
+
+    private func acceptDiscovery(_ discovery: NativeCaptureDiscoveryResult) {
+        devices = discovery.devices.map { CaptureDevice(id: $0.id, name: $0.name, platform: $0.platform, state: $0.state) }
+        tools = discovery.tools.mapValues { Optional($0) }
+        networkServices = discovery.networkServices
+        didDiscover = true; discoveryCheckedAt = Date()
     }
 
     func showExternalRequestNotice(_ message: String) { externalRequestNotice = message }
@@ -491,7 +496,7 @@ final class CaptureStore {
     }
 
     func stopBeforeQuit() async {
-        while setup.isLaunchingCheck { try? await Task.sleep(for: .milliseconds(100)) }
+        while setup.isLaunchingCheck || setup.isPreparingCertificate { try? await Task.sleep(for: .milliseconds(100)) }
         if let check = setup.checkCapture, check.hasActiveCapture { await check.stopBeforeQuit() }
         guard setup.checkCapture?.hasActiveCapture != true else { isSetupPresented = true; return }
         while isBusy || isAddingMarker { try? await Task.sleep(for: .milliseconds(100)) }

@@ -155,4 +155,136 @@ struct CaptureSetupStoreTests {
         #expect(restored.setup.report == nil)
         #expect(!restored.captureLogs && !restored.hasActiveCapture)
     }
+
+    @Test func `Android certificate preparation restores the connection before installation help`() async throws {
+        let fixture = try PreparationFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        store.captureLogs = true
+        store.targetApp = "dev.example.test"
+        await store.setup.prepareAndroidCertificate(store)
+        let preparation = try #require(store.setup.checkCapture)
+        let request = try fixture.request()
+        #expect(request["capture_logs"] as? Bool == false)
+        #expect(request["capture_network"] as? Bool == true)
+        #expect(store.captureLogs && store.captureNetwork)
+        #expect(preparation.setupContext?.purpose == .check)
+        #expect(preparation.setupContext?.plan == nil)
+        #expect(CaptureSessionSetupContext.validNonce(try #require(preparation.setupContext?.probeNonce)))
+        #expect(try fixture.commands() == ["start", "transfer-ca", "stop"])
+        #expect(preparation.session?.routingRestored == true)
+        #expect(!store.hasActiveCapture && !store.setup.hasLiveCheck)
+        #expect(store.setup.certificateReadyForInstallation)
+        #expect(store.setup.verificationCapture == nil)
+        #expect(!store.setup.browserHTTPSObserved && !store.setup.phoneOriginConfirmed)
+        #expect(store.setup.notice?.contains("no capture is running") == true)
+        store.selectedDeviceID = "android:different-device"
+        store.setup.configurationDidChange(store)
+        #expect(!store.setup.certificateReadyForInstallation)
+        #expect(store.setup.notice == nil)
+    }
+
+    @Test func `a failed certificate-preparation stop retains ownership and withholds installation readiness`() async throws {
+        let fixture = try PreparationFixture(failStop: true)
+        defer { fixture.remove() }
+        let store = fixture.store()
+        await store.setup.prepareAndroidCertificate(store)
+        #expect(store.hasActiveCapture && store.setup.hasLiveCheck)
+        #expect(!store.canStart)
+        #expect(store.setup.certificateWasCopied)
+        #expect(!store.setup.certificateReadyForInstallation)
+        #expect(store.setup.notice == nil)
+        #expect(store.setup.error?.contains("needs recovery") == true)
+        store.isSetupPresented = true
+        store.setup.dismiss(store)
+        #expect(store.isSetupPresented)
+        try FileManager.default.removeItem(at: fixture.root.appendingPathComponent("fail-stop"))
+        await store.setup.stopCheck()
+        #expect(!store.hasActiveCapture && store.setup.certificateReadyForInstallation)
+        #expect(store.setup.verificationCapture == nil)
+        #expect(store.setup.error == nil)
+    }
+
+    @Test func `certificate transfer failure still restores the owned connection`() async throws {
+        let fixture = try PreparationFixture(failTransfer: true)
+        defer { fixture.remove() }
+        let store = fixture.store()
+        await store.setup.prepareAndroidCertificate(store)
+        #expect(try fixture.commands() == ["start", "transfer-ca", "stop"])
+        #expect(!store.hasActiveCapture)
+        #expect(!store.setup.certificateReadyForInstallation)
+        #expect(store.setup.error?.contains("Synthetic copy failure") == true)
+        #expect(store.setup.notice?.contains("was not copied") == true)
+    }
+
+    private struct PreparationFixture {
+        let root: URL
+        let host: URL
+
+        init(failStop: Bool = false, failTransfer: Bool = false) throws {
+            root = FileManager.default.temporaryDirectory.appendingPathComponent("guided-preparation-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+            host = root.appendingPathComponent("synthetic-host")
+            try Data(Self.hostScript.utf8).write(to: host)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: host.path)
+            if failStop { try Data().write(to: root.appendingPathComponent("fail-stop")) }
+            if failTransfer { try Data().write(to: root.appendingPathComponent("fail-transfer")) }
+        }
+
+        @MainActor func store() -> CaptureStore {
+            let store = CaptureStore(hostExecutable: host,
+                initialDiscovery: NativeCaptureDiscoveryResult(
+                    devices: [.init(id: "synthetic", name: "Synthetic Android", platform: "android", state: "ready")],
+                    tools: [:], networkServices: [], warnings: []), outputRoot: root.appendingPathComponent("sessions"))
+            store.selectedDeviceID = "android:synthetic"
+            return store
+        }
+
+        func remove() { try? FileManager.default.removeItem(at: root) }
+        func commands() throws -> [String] {
+            try String(contentsOf: root.appendingPathComponent("commands"), encoding: .utf8).split(separator: "\n").map(String.init)
+                .filter { $0 != "status" }
+        }
+        func request() throws -> [String: Any] {
+            try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("request.json"))) as? [String: Any] ?? [:]
+        }
+
+        /// Only temporary JSON files are touched. No device tools, sockets, proxies or collectors.
+        private static let hostScript = #"""
+        #!/usr/bin/python3
+        import datetime, json, pathlib, sys
+        root = pathlib.Path(__file__).parent
+        command = sys.argv[1]
+        with (root / "commands").open("a") as out: out.write(command + "\n")
+        state_file = root / "state.json"
+        if command == "start":
+            request = json.loads(pathlib.Path(sys.argv[3]).read_text())
+            (root / "request.json").write_text(json.dumps(request))
+            session = pathlib.Path(request["output_root"]) / "certificate-preparation"
+            for part in ("logs", "network", "timeline", "setup", "runtime"): (session / part).mkdir(parents=True, exist_ok=True)
+            certificate = session / "setup" / "capture-ca-cert.pem"
+            certificate.write_text("synthetic public certificate fixture")
+            state = {"id":"preparation-proof", "directory":str(session), "platform":"android",
+                     "device_id":"synthetic", "device_name":"Synthetic Android",
+                     "started_at":datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z"),
+                     "phase":"recording", "sources":{"logs":"not_selected","network":"started"},
+                     "warnings":[], "routing_restored":False, "ca_certificate_path":str(certificate), "counts":{}}
+        else:
+            state = json.loads(state_file.read_text())
+        error = None
+        if command == "transfer-ca" and (root / "fail-transfer").exists(): error = "Synthetic copy failure"
+        if command == "stop":
+            if (root / "fail-stop").exists(): error = "Synthetic restore failure"
+            else:
+                state["phase"] = "saved"
+                state["routing_restored"] = True
+                state["package_path"] = str(pathlib.Path(state["directory"]) / "evidence.zip")
+        state_file.write_text(json.dumps(state))
+        (pathlib.Path(state["directory"]) / "session.json").write_text(json.dumps(state))
+        payload = {"session":state}
+        if error: payload["error"] = error
+        print(json.dumps(payload))
+        sys.exit(1 if error else 0)
+        """#
+    }
 }

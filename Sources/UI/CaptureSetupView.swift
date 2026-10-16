@@ -212,7 +212,7 @@ struct CaptureSetupView: View {
 
     private var prepareDevice: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if let check = setup.report?.checks.first(where: { [.actionNeeded, .unavailable, .needsEngineerHelp].contains($0.state) }) {
+            if !setup.hasLiveCheck, let check = setup.report?.checks.first(where: { [.actionNeeded, .unavailable, .needsEngineerHelp].contains($0.state) }) {
                 GroupBox {
                     VStack(alignment: .leading, spacing: 10) {
                         Label(check.title, systemImage: stateSymbol(check.state)).font(.headline)
@@ -249,7 +249,31 @@ struct CaptureSetupView: View {
                 GroupBox("Prepare Your Android App") {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Use the test build from your engineer. USB debugging must be enabled and this computer authorized on the phone.")
-                        Text("For HTTPS bodies, the app must trust this capture’s certificate. The next step creates a short recording and can copy its public certificate to Downloads for installation.")
+                        if store.captureNetwork {
+                            Text("For HTTPS bodies, the app must trust this capture’s certificate. Copy it to your phone first, then install it at your own pace.")
+                            if setup.isPreparingCertificate {
+                                ProgressView("Copying Certificate and Restoring Connection…").controlSize(.small)
+                                Text("The Mac briefly prepares its capture connection, copies only the public certificate, then restores the connection before you install it.")
+                                    .font(.callout).foregroundStyle(.secondary)
+                            } else if setup.isCertificatePreparation, setup.hasLiveCheck {
+                                Label("Restore the Preparation Connection", systemImage: "network.slash").font(.headline)
+                                Text("Finish restoring the connection before installing the certificate. Your capture choices and earlier session are preserved.")
+                                Button("Restore Connection & Finish Preparation", systemImage: "arrow.clockwise") {
+                                    Task { await setup.stopCheck() }
+                                }.buttonStyle(.borderedProminent).disabled(setup.checkCapture?.isBusy == true)
+                            } else {
+                                Button(setup.certificateReadyForInstallation && setup.certificatePreparationDeviceID == store.selectedDeviceID
+                                       ? "Copy Capture Certificate Again" : "Prepare & Copy Capture Certificate", systemImage: "certificate") {
+                                    Task { await setup.prepareAndroidCertificate(store) }
+                                }.disabled(store.isBusy || store.hasActiveCapture)
+                                if setup.certificateReadyForInstallation, setup.certificatePreparationDeviceID == store.selectedDeviceID {
+                                    Label("Certificate Copied · Connection Restored", systemImage: "doc.badge.checkmark").font(.headline)
+                                    Text("On Android, open Settings and search Install a certificate. Choose CA certificate, then the newest mobile-capture-ca file in Downloads. Complete the phone’s confirmation.")
+                                    Text("Take your time. No capture is running. When installation is complete, continue to a fresh capture check; copying the certificate does not verify trust.")
+                                        .font(.callout).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                         Text("An installed certificate alone does not make every app or ad SDK inspectable. Your engineer may need to adjust debug trust or certificate pinning.")
                             .font(.callout).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
@@ -258,10 +282,10 @@ struct CaptureSetupView: View {
             Text("Ready to try means the prerequisites are available. A check must observe fresh app logs and a decoded HTTPS response before those sources are verified.")
                 .font(.callout).foregroundStyle(.secondary)
             HStack {
-                Button("Back") { setup.step = .choose }
+                Button("Back") { setup.step = .choose }.disabled(setup.hasLiveCheck)
                 Spacer()
                 Button("Continue to Capture Check", systemImage: "arrow.right") { setup.step = .check }
-                    .buttonStyle(.borderedProminent).disabled(!store.canStart || selectionIssue != nil)
+                    .buttonStyle(.borderedProminent).disabled(setup.hasLiveCheck || !store.canStart || selectionIssue != nil)
             }
         }
     }
@@ -270,7 +294,7 @@ struct CaptureSetupView: View {
         VStack(alignment: .leading, spacing: 18) {
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(setup.hasLiveCheck ? "Check in Progress" : setup.checkCapture?.session == nil ? "Try a Short Capture" : "Review the Capture Check")
+                    Text(setup.hasLiveCheck ? "Check in Progress" : setup.verificationCapture?.session == nil ? "Try a Short Capture" : "Review the Capture Check")
                         .font(.title2.weight(.semibold))
                     if setup.isLaunchingCheck {
                         ProgressView("Preparing Capture Check…").controlSize(.small)
@@ -308,7 +332,7 @@ struct CaptureSetupView: View {
                             Task { await setup.stopCheck(); await setup.inspect(store) }
                         }.buttonStyle(.borderedProminent).disabled(check.isBusy)
                         if check.isSaving { ProgressView(check.saveStageTitle).controlSize(.small) }
-                    } else if let check = setup.checkCapture, let session = check.session {
+                    } else if let check = setup.verificationCapture, let session = check.session {
                         checkSummary(check)
                         if session.packagePath != nil {
                             HStack {
@@ -328,6 +352,10 @@ struct CaptureSetupView: View {
                         }
                         Text("The check ends after 45 seconds. For an iPhone network check, the Mac keeps forwarding until you turn off the tunnel and confirm Stop Check & Save.")
                             .font(.callout).foregroundStyle(.secondary)
+                        if store.selectedDevice?.platform == "iphone" {
+                            Text("If certificate installation takes longer than the log check, finish the phone setup, turn the tunnel off, save this check and run a fresh check for app logs.")
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
                         Button("Start Capture Check", systemImage: "checkmark.circle") { Task { await setup.startCheck(store) } }
                             .buttonStyle(.borderedProminent).disabled(!store.canStart || selectionIssue != nil)
                     }
@@ -339,7 +367,7 @@ struct CaptureSetupView: View {
                 Spacer()
                 Button(setup.missingRequiredSources(store).isEmpty ? "Continue to Recording" : "Continue with Missing Evidence", systemImage: "arrow.right") {
                     setup.step = .record
-                }.buttonStyle(.borderedProminent).disabled(setup.hasLiveCheck || setup.checkCapture?.session == nil)
+                }.buttonStyle(.borderedProminent).disabled(setup.hasLiveCheck || setup.verificationCapture?.session == nil)
             }
         }
     }
