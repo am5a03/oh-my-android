@@ -168,7 +168,7 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         case .setup: return !store.isBusy && !store.doctor.isRepairing
         case .doctor: return !store.isBusy && !store.hasActiveCapture && !store.doctor.isRepairing
         case .exportSetupReport: return store.hasSetupReport
-        case .openSession: return !store.isBusy && !store.hasActiveCapture
+        case .openSession: return !store.isBusy && !store.hasActiveCapture && !store.doctor.isRepairing
         case .start: return store.canStart
         case .stop:
             item.title = if store.operationSession?.needsRoutingRecovery == true { "Restore Connection & Save" }

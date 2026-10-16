@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 @Observable
 final class CaptureStore {
     let setup: CaptureSetupStore
-    let doctor = CaptureDoctorStore()
+    let doctor: CaptureDoctorStore
     var isSetupPresented = false
     var isDoctorPresented = false
     private(set) var devices: [CaptureDevice] = []
@@ -117,7 +117,8 @@ final class CaptureStore {
          setupInspector: CaptureSetupInspector = CaptureSetupInspector(),
          discover: @escaping @Sendable (CaptureToolConfiguration) async throws -> NativeCaptureDiscoveryResult = { configuration in
              try await NativeCaptureDiscovery().discover(configuration: configuration)
-         }) {
+         }, doctor: CaptureDoctorStore? = nil) {
+        self.doctor = doctor ?? CaptureDoctorStore()
         self.hostExecutable = hostExecutable
         self.setupInspector = setupInspector
         self.setup = CaptureSetupStore(inspector: setupInspector)
@@ -132,7 +133,7 @@ final class CaptureStore {
     /// Only an explicit device picker action requests installed-app access. Loading saved metadata
     /// and copying a check's selection must not initiate a phone pairing handshake.
     func selectDeviceForCapture(_ selectionID: String) {
-        guard !hasActiveCapture else { return }
+        guard !hasActiveCapture, !doctor.isRepairing else { return }
         selectedDeviceID = selectionID
         Task { [weak self] in await self?.refreshApplications() }
     }
@@ -298,20 +299,21 @@ final class CaptureStore {
 
     /// External context is a suggestion. Never replace a recording, inspected session or unavailable target.
     func applyExternalSelection(platform: String, deviceID: String, applicationID: String?) async {
+        guard !preserveContextDuringDoctorRepair() else { return }
         guard session == nil, !hasActiveCapture, !isBusy, !isSetupPresented else {
             externalRequestNotice = "A companion requested \(applicationID ?? platform) on device \(deviceID). Your current session and selection remain open."
             return
         }
         selectedDeviceID = ""
         await refreshDevices()
-        guard !isBusy, !hasActiveCapture, session == nil else { return }
+        guard !preserveContextDuringDoctorRepair(), !isBusy, !hasActiveCapture, session == nil else { return }
         guard let device = devices.first(where: { $0.platform == platform && $0.id == deviceID }), device.isReady else {
             externalRequestNotice = "The requested device \(deviceID) is unavailable. Connect it, then select it here. No other device was selected."
             return
         }
         selectedDeviceID = device.selectionID
         await refreshApplications()
-        guard selectedDeviceID == device.selectionID, session == nil, !hasActiveCapture else { return }
+        guard !preserveContextDuringDoctorRepair(), selectedDeviceID == device.selectionID, session == nil, !hasActiveCapture else { return }
         if let applicationID {
             if applications.contains(where: { $0.id == applicationID }) { targetApp = applicationID }
             else {
@@ -324,7 +326,7 @@ final class CaptureStore {
     }
 
     func openSession() async {
-        guard !isBusy, !hasActiveCapture else { return }
+        guard !isBusy, !hasActiveCapture, !doctor.isRepairing else { return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -338,7 +340,7 @@ final class CaptureStore {
 
     /// Opening and inspecting evidence requires no Python process or installed capture tools.
     func loadSession(at directory: URL) async {
-        guard !isBusy, !hasActiveCapture else { return }
+        guard !isBusy, !hasActiveCapture, !doctor.isRepairing else { return }
         isSetupPresented = false
         isBusy = true
         error = nil
@@ -589,16 +591,22 @@ final class CaptureStore {
     }
 
     func chooseOutputRoot() {
-        guard !hasActiveCapture, !isBusy else { return }
+        guard !hasActiveCapture, !isBusy, !doctor.isRepairing else { return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.message = "Choose a local folder for capture sessions. Full request bodies and logs may contain private data."
-        if panel.runModal() == .OK, let url = panel.url {
+        if panel.runModal() == .OK, let url = panel.url, !doctor.isRepairing, !hasActiveCapture, !isBusy {
             outputRoot = url
             UserDefaults.standard.set(url.path, forKey: "capture.sessionsRoot")
         }
+    }
+
+    private func preserveContextDuringDoctorRepair() -> Bool {
+        guard doctor.isRepairing else { return false }
+        externalRequestNotice = "A companion requested a capture context change. Finish or cancel the Doctor installation before changing devices or opening another session. Your current selection is preserved."
+        return true
     }
 
     func revealPackage() {

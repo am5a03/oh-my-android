@@ -17,6 +17,7 @@ struct CaptureCommandTargetTests {
         commands.menu.update()
         let setup = try #require(commands.menu.items.first { $0.title == "Device Setup…" })
         let doctor = try #require(commands.menu.items.first { $0.title == "Doctor…" })
+        let open = try #require(commands.menu.items.first { $0.title == "Open Session…" })
         #expect(setup.isEnabled)
         #expect(doctor.isEnabled)
         #expect(!commands.menu.items.contains { $0.title.contains("Capture Plan") })
@@ -32,6 +33,7 @@ struct CaptureCommandTargetTests {
         store.doctor.isRepairing = true
         commands.menu.update()
         #expect(!setup.isEnabled && !doctor.isEnabled)
+        #expect(!open.isEnabled)
     }
 
     @Test func nativeTimelineMenuReflectsPauseFollowWrapAndPaging() throws {

@@ -5,6 +5,42 @@ import Testing
 
 @MainActor
 struct CaptureDoctorStoreTests {
+    @Test func `the owning capture store preserves device and session context during repair`() async throws {
+        let fixture = try DoctorStoreFixture()
+        defer { fixture.remove() }
+        let runner = DoctorStoreRunner()
+        let doctor = fixture.doctor(runner)
+        let owner = fixture.owner(doctor: doctor)
+        #expect(owner.doctor === doctor)
+        owner.targetApp = "dev.example.retained"
+        owner.search = "retained timeline filter"
+        let selection = owner.selectedDeviceID
+        let output = owner.outputRoot
+        let saved = fixture.root.appendingPathComponent("saved-evidence")
+        try FileManager.default.createDirectory(at: saved, withIntermediateDirectories: false)
+        let metadata: [String: Any] = ["id":"other-session", "directory":saved.path, "platform":"android",
+            "device_id":"other-device", "device_name":"Other Device", "started_at":"2026-10-15T00:00:00Z",
+            "phase":"saved", "routing_restored":true, "sources":["logs":"not_selected", "network":"not_selected"]]
+        try JSONSerialization.data(withJSONObject: metadata).write(to: saved.appendingPathComponent("session.json"))
+
+        await doctor.prepareRepair(.installIPhoneUSBTools, owner: owner)
+        doctor.beginRepair(owner)
+        try await waitUntil { await runner.installCount == 1 }
+        owner.selectDeviceForCapture("android:other-device")
+        await owner.applyExternalSelection(platform: "android", deviceID: "other-device", applicationID: "dev.example.other")
+        await owner.loadSession(at: saved)
+        #expect(owner.selectedDeviceID == selection && owner.targetApp == "dev.example.retained")
+        #expect(owner.session == nil && owner.search == "retained timeline filter" && owner.outputRoot == output)
+        #expect(owner.externalRequestNotice?.contains("Doctor installation") == true)
+        doctor.cancelRepair()
+        try await waitUntil { await runner.cleanupStarted }
+        #expect(doctor.isRepairing && owner.selectedDeviceID == selection)
+        await runner.releaseCleanup()
+        await doctor.stopBeforeQuit()
+        #expect(!doctor.isRepairing && owner.selectedDeviceID == selection)
+        #expect(owner.targetApp == "dev.example.retained" && owner.session == nil)
+    }
+
     @Test func `setup checks network components independently of everyday app logging`() async throws {
         let fixture = try DoctorStoreFixture()
         defer { fixture.remove() }
@@ -120,11 +156,11 @@ private struct DoctorStoreFixture {
         try Data("Synthetic non-executed test fixture".utf8).write(to: brew)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: brew.path)
     }
-    @MainActor func owner() -> CaptureStore {
+    @MainActor func owner(doctor: CaptureDoctorStore? = nil) -> CaptureStore {
         let discovery = NativeCaptureDiscoveryResult(devices: [.init(id: "synthetic", name: "Synthetic iPhone", platform: "iphone", state: "ready")],
             tools: [:], networkServices: [], warnings: [])
         let owner = CaptureStore(hostExecutable: root.appendingPathComponent("nonexistent-host"),
-            initialDiscovery: discovery, outputRoot: root.appendingPathComponent("sessions"), discover: { _ in discovery })
+            initialDiscovery: discovery, outputRoot: root.appendingPathComponent("sessions"), discover: { _ in discovery }, doctor: doctor)
         owner.selectedDeviceID = "iphone:synthetic"
         owner.captureNetwork = false
         owner.captureLogs = false

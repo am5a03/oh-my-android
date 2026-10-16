@@ -59,7 +59,7 @@ struct CaptureView: View {
                 Button { Task { await store.openSession() } } label: {
                     toolbarLabel("Open Session…", symbol: "folder")
                 }
-                    .disabled(store.hasActiveCapture || store.isBusy)
+                    .disabled(store.hasActiveCapture || store.isBusy || store.doctor.isRepairing)
                     .help(openSessionHelp)
                     .accessibilityLabel("Open Session")
                     .accessibilityHint(openSessionHelp)
@@ -242,6 +242,7 @@ struct CaptureView: View {
     }
 
     private var openSessionHelp: String {
+        if store.doctor.isRepairing { return "Finish or cancel the Doctor installation before opening another session." }
         if store.hasActiveCapture { return "Stop and save the current capture before opening another session." }
         if store.isBusy { return "Wait for the current operation to finish, then open a saved capture folder." }
         return "Open a saved capture folder to inspect its timeline or recover an interrupted capture."

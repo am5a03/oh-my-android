@@ -53,11 +53,15 @@ final class MobileCaptureAppDelegate: NSObject, NSApplicationDelegate {
                         await capture.store.applyExternalSelection(platform: context.platform.rawValue,
                             deviceID: context.deviceID, applicationID: context.applicationID)
                     case .session(let id):
+                        guard !capture.store.doctor.isRepairing else {
+                            capture.store.showExternalRequestNotice("A link requested session \(id). Finish or cancel the Doctor installation before opening another session. Your current selection is preserved.")
+                            continue
+                        }
                         let roots = [capture.store.outputRoot, CaptureSessionRegistry.defaultRoot]
                         let directory = try await Task.detached(priority: .userInitiated) {
                             try CaptureSessionRegistry(roots: roots).resolve(id: id)
                         }.value
-                        guard capture.store.session == nil, !capture.store.hasActiveCapture, !capture.store.isBusy else {
+                        guard capture.store.session == nil, !capture.store.hasActiveCapture, !capture.store.isBusy, !capture.store.doctor.isRepairing else {
                             capture.store.showExternalRequestNotice("A link requested session \(id). Your current session remains open. Use Open Session to switch when ready.")
                             continue
                         }
