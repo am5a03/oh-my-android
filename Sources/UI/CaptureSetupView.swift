@@ -404,7 +404,7 @@ struct CaptureSetupView: View {
 
     private var firstDoctorIssue: CaptureDoctorCheck? {
         guard store.doctor.hasCurrentReport(store) else { return nil }
-        return store.doctor.report?.rows.first { $0.status == .missing || $0.status == .incompatible }
+        return store.doctor.report?.rows.first { $0.status != .ready }
     }
 
     private var connectionGuidance: String {

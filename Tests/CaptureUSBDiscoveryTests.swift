@@ -25,7 +25,7 @@ struct CaptureUSBDiscoveryTests {
         let result = try await discovery.discover(configuration: configuration)
         try require(result.devices.filter { $0.platform == "iphone" }.count == 1 && result.devices.first?.name == "USB Fixture",
                     "USB and CoreDevice hardware IDs deduplicate across letter case with current USB metadata")
-        try require(result.warnings.contains { $0.contains("not verified logging/trust") }, "ready-to-try USB metadata never claims trust or observed logs")
+        try require(result.warnings.contains { $0.contains("Trust This Computer") && $0.contains("does not confirm successful capture") }, "USB detection offers phone guidance without claiming trust or observed logs")
         try require(result.tools["ideviceinstaller"] == tools["ideviceinstaller"], "installed metadata can use packaged installer")
         try require(try discovery.resolve(nil, name: "ideviceinfo", candidates: ["/usr/bin/true"])?.path == tools["ideviceinfo"], "bundled candidate takes precedence")
         let calls = await runner.calls

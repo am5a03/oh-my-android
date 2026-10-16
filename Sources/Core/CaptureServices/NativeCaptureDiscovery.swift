@@ -162,7 +162,7 @@ nonisolated struct NativeCaptureDiscovery: Sendable {
                 devices += probes.compactMap(\.device).sorted { $0.id < $1.id }
                 warnings += probes.compactMap(\.warning)
                 if probes.contains(where: { $0.device != nil }) {
-                    warnings.append("USB iPhone detection is ready to try, not verified logging/trust. Explicit app/check access may ask for normal phone trust. Verify fresh emitted logs before claiming USB logging works.")
+                    warnings.append("Keep iPhone unlocked. If asked while choosing an app or checking the connection, approve Trust This Computer on the phone. Device detection alone does not confirm successful capture.")
                 }
             } else { warnings.append("USB iPhone discovery is unavailable. Check the USB connection and this build's USB tools with an engineer.") }
         }
