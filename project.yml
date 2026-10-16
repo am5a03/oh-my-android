@@ -46,9 +46,11 @@ targets:
           - Core/CaptureModels.swift
           - State/CaptureStore.swift
           - State/CaptureSetupStore.swift
+          - State/CaptureDoctorStore.swift
           - Windows/CaptureWindowController.swift
           - UI/CaptureView.swift
           - UI/CaptureSetupView.swift
+          - UI/CaptureDoctorView.swift
           - UI/CaptureCommands.swift
           - UI/CaptureTimelineList.swift
           - UI/CaptureLogSettingsView.swift
@@ -166,10 +168,12 @@ targets:
       - path: Sources/Core/CaptureHandoff
       - path: Sources/State/CaptureStore.swift
       - path: Sources/State/CaptureSetupStore.swift
+      - path: Sources/State/CaptureDoctorStore.swift
       - path: Sources/Windows/ToolWindow.swift
       - path: Sources/Windows/CaptureWindowController.swift
       - path: Sources/UI/CaptureView.swift
       - path: Sources/UI/CaptureSetupView.swift
+      - path: Sources/UI/CaptureDoctorView.swift
       - path: Sources/UI/CaptureCommands.swift
       - path: Sources/UI/CaptureTimelineList.swift
       - path: Sources/UI/CaptureLogSettingsView.swift
