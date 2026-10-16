@@ -1,156 +1,186 @@
-# Guided capture setup implementation
+# First-run setup and Doctor implementation
 
-This report describes the existing task-oriented implementation. The user has
-since narrowed the product to first-run phone preparation followed by the normal
-timeline. [The revised first-run setup plan](CAPTURE-SETUP-PLAN.md) supersedes that
-earlier UX direction; its simplification has not yet been implemented.
+Mobile Capture now offers optional first-use phone setup, then returns to its
+normal shared timeline. The task-file/reproduction assistant has been removed
+from normal use. This follows [the revised setup plan](CAPTURE-SETUP-PLAN.md).
 
-Mobile Capture now has an optional **Set Up Capture** workspace for selecting a
-task, connecting a phone, preparing its capture path, checking evidence and
-recording a reproduction. The existing shared timeline and saved-session viewer
-remain accessible without onboarding. This implements the previous setup plan;
-physical-device and fresh-user acceptance
-are separate from the offline validation below.
+## First use
 
-## Using the assistant
+1. Open **Mobile Capture.app**. On the first ordinary launch, **Set Up Your Device**
+   is offered once. **Open Timeline** leaves the assistant available later.
+2. Connect and unlock a phone. A single ready device can be selected automatically;
+   multiple devices require a selection. Connection polling does not enumerate apps.
+3. Doctor checks the relevant Mac capture tools automatically, using network-only
+   setup intent. Missing/incompatible components lead to **Open Doctor…**.
+4. Prepare the phone. Android copies the public CA to Downloads and restores its
+   temporary connection before showing installation instructions. iPhone guides
+   WireGuard profile import, certificate profile installation and the separate
+   **Enable Full Trust** step.
+5. Run **Check Connection** and open its current link/QR on the phone. Actual
+   decoded HTTPS is required; the explicit phone-origin confirmation is recorded
+   as user reported where transport cannot independently establish origin.
+6. Stop the setup connection and restore routing. On iPhone, first turn the tunnel
+   off and confirm Stop. **Device Setup Complete → Open Timeline** finishes setup.
 
-1. Open the standalone **Mobile Capture.app**, then choose **Set Up Capture** in
-   the toolbar or Capture menu.
-2. Open an engineer's JSON capture plan and review it before applying, or choose
-   manual capture. Select the intended device and installed app. Unsupported or
-   unavailable devices are not selectable. Android names may fall back to package
-   identifiers when installed metadata provides no friendly label.
-3. Prepare the device using the current instruction. Android certificate
-   preparation copies the public certificate to Downloads, then stops and saves
-   its separate network-only session and restores routing before presenting the
-   installation steps. Install it with the phone's CA-certificate confirmation
-   at your own pace, then start verification. For iPhone, follow the saved
-   WireGuard profile and certificate installation/full-trust instructions.
-4. Run the bounded check and open its current link on the phone. Its synthetic
-   page tests HTTPS capture through the same proxy and CA as normal recording.
-   If device origin cannot be independently established, the explicit phone-action
-   confirmation is recorded as user reported. Open the selected app to emit app
-   logs; browser HTTPS success does not establish app/SDK TLS behavior.
-5. Stop and save the check. For iPhone, turn the tunnel off and confirm before
-   forwarding stops. Then record the actual reproduction, using **Mark This
-   Moment** for actions worth locating later.
-6. Choose **Stop & Save**. Review source coverage and the shared timeline, then
-   **Export ZIP…**, **Show in Finder**, or **Record Again**. For a blocked first
-   setup, **Export Setup Report…** gives the engineer a diagnostic package without
-   starting a recording.
+Phone installation instructions are untimed. iPhone preparation keeps forwarding
+available while the user is in Settings and collects no device logs. If that
+preparation has become too old for a fresh proof, the app asks the user to turn
+the tunnel off, stop safely and start a new check. It does not silently kill or
+relabel the old session. Copying/installing a certificate does not prove trust.
 
-An applied task is remembered in the companion's preferences. Verified checks,
-phone confirmations and old evidence are not restored as current proof. Manual
-capture clears the remembered task. Device/app, plan, tools, limits, output
-location, CA, tunnel profile and endpoint changes invalidate affected checks.
+**Set Up HTTPS Later** permits logs-only recording or saved-session inspection.
+A missing app selection, invalid everyday log limit or disabled Network checkbox
+does not prevent running the separate network-only setup check. Setup preserves
+the user's normal source/app choices and any inspected recording.
 
-## Capture and evidence behavior
+## Repeat use and repair
 
-- Plans are bounded, versioned declarative data. They cannot run commands,
-  download/install apps, alter certificate trust or upload evidence. The
-  [schema and example](examples/CAPTURE-TASKS.md) document the supported fields.
-- Log collection stays app scoped for engineer tasks. The default plan budget is
-  20 MB, 25,000 records or two minutes, with the existing 200 MB/250,000-record/
-  ten-minute maxima. Manual whole-device logging remains an explicit advanced
-  choice, and cannot satisfy an app-scoped task automatically.
-- A check uses a separate store to preserve the session being inspected, but the
-  same host, routing lease, collectors, timeline and export format. The check
-  caps logs at the smaller of the task budget and 10 MB/10,000 records/45 seconds.
-  iPhone forwarding remains available after its deadline until tunnel-off
-  confirmation and safe Stop complete. Closing or quitting cannot abandon a
-  running check or an in-progress save.
-- Setup checks are read only until a preparation/check action is chosen. Automatic
-  rechecks use USB metadata without pairing calls. Installed-app access is an
-  explicit selection/refresh action; opening saved evidence does not enumerate
-  apps on a phone. Private profiles are validated without changing permissions.
-- The nonce-bound synthetic HTTP page and HTTPS response live in the existing
-  proxy addon. The request carries no app credentials or captured payloads to an
-  external echo service. Its actual decoded response body is checked against the
-  current nonce/session/configuration. HTTP-only activity, collector startup,
-  stale responses, malformed/partial bodies and a clicked acknowledgment cannot
-  independently establish successful HTTPS capture.
-- Browser proof, app-log evidence and task-source coverage are separate. Parsed
-  scoped logs prove emitted log records; task network coverage requires a completed
-  decoded HTTPS response with both full body representations. Setup-probe traffic
-  is excluded, including the reserved probe URL when its marker is absent.
-  Request-host hints do not identify the originating app or prove ad causality.
+Later launches open the timeline. Choose a device, Device Logs and/or Network
+Requests & Responses, and an installed app when app-scoped logs are enabled.
+Use **Start Capture → Stop & Save → Export ZIP…**. Existing filter, pause/follow,
+clear-view, paging, wrapping, inspection and marker controls remain available.
 
-## Engineer handoff
+Historical setup progress is stored per device and current public CA, plus the
+iPhone profile/endpoint where applicable. Loading that history does not restore
+live proof or assert a remote certificate-trust switch. Quiet read-only inspection
+lets a known unchanged phone avoid repeated setup. New devices, missing/changed
+certificates or changed iPhone profiles receive a relevant **Finish Setup…** action.
+Ordinary app/log-source changes do not restart phone setup. Android setup is
+independent of a Mac LAN-address change because it uses the USB reverse path.
 
-Recording ZIPs retain all admitted raw evidence, full network bodies, normalized
-timeline, manifest and checksums. `ENGINEER-SUMMARY.txt` adds task identity,
-reproduction steps, preparation context, source coverage and gaps. Coverage is
-recomputed from the evidence while exporting; supplied status cannot upgrade it.
-Missing required sources remain explicit in `task_assessment`, completeness and
-the app's saved-session state, even when saving succeeds. Optional-only tasks are
-not described as having verified required evidence.
+Opening setup help and returning to the timeline preserves completed progress.
+Explicit deferral keeps unfinished setup visible when network capture is wanted.
+**Capture → Device Setup…** and **Settings → Devices** reopen the assistant.
 
-A setup-only ZIP contains exactly `setup-report.json`, `ENGINEER-SUMMARY.txt` and
-`SHA256SUMS`. It packages typed public identities and bounded diagnostic messages,
-and reads no recording, runtime, pairing, certificate-key or private-profile files.
-Both exports are local user-selected files, with no automatic engineer/AI upload.
+iPhone profile import and certificate trust are first-use actions. Turning the
+WireGuard tunnel on/off remains a per-recording action in this version, with a
+short instruction beside capture controls.
 
-## Distribution and validation boundaries
+## Doctor
 
-The standalone migration is complete in code and packaging: each application has
-its own lifecycle and helpers, and Oh My Android opens an optional companion.
-Existing evidence, stable CA, private profiles and global lease remain in place.
-See [the migration report](CAPTURE-STANDALONE-IMPLEMENTATION.md).
+Open **Capture → Doctor…**, **Settings → Devices → Doctor…**, or **Check Setup…**
+inside the assistant. Doctor checks only tools needed by the relevant platform
+and sources; an absent Simulator or iPhone tool does not block Android capture.
+If no phone is detected, **Device Type** lets the user check Android, iPhone or
+Simulator dependencies. This diagnostic choice changes no capture device or source
+settings, and a selected capture device takes precedence. It makes missing iPhone
+USB tools diagnosable even when their absence prevents phone discovery.
 
-The optional iPhone USB candidate now removes the code's mandatory Xcode discovery
-dependency and packages an exact local dependency closure. Static signing and
-clean-PATH version probes are verified; clean-Mac pairing, app access, current-iOS
-logging and notarization are not established by those probes. The default package
-keeps iPhone engineer assisted, and the experimental candidate is available only
-for development builds. See [distribution](CAPTURE-DISTRIBUTION.md).
+Local checks include signed bundled-payload integrity, native architecture,
+reviewed tool/runtime versions, advertised capabilities, and private writable
+capture storage/headroom. The engine includes its own Python. Explicit advanced
+ADB/mitmdump overrides are checked rather than silently reporting a bundled
+alternative as ready. Unsupported external locations are not executed.
 
-Before an AdOps release, complete real cold/warm app handoff, coordinated guided
-Android/iPhone capture, interruption/recovery, VoiceOver/keyboard and fresh-user
-acceptance on the shipping package. Resolve the previously observed WireGuard
-engine shutdown crash, choose the permanent release identity/artwork and complete
-Developer ID/notarization. Earlier platform logging proofs are in
-[the logging validation report](CAPTURE-LOGGING-VALIDATION.md).
+Phone setup rows reuse read-only readiness checks for device access, current CA,
+profile and connection evidence. **Check Again** refreshes USB metadata without
+app enumeration, then repeats diagnostics. Local file/tool presence is a
+prerequisite; the HTTPS check still requires a fresh captured response.
 
-## Software validation
+Rows show **Ready**, **Needs Action**, **Missing** or **Incompatible**, with an
+explanation and **Fix…** or guided instructions. Technical paths and bounded output
+are under **Technical Details**. Checking does not install software, prepare keys
+or change phone routing.
 
-The implementation is covered by Swift 6 builds with warnings as errors and
-focused offline checks for plan import, readiness identities/freshness, bounded
-store state, menus, timeline proof admission, host lifecycle/recovery and both
-evidence exports. The proxy's synthetic page and HTTPS/body parity also pass
-against the bundled mitmproxy 12.2.3 on an isolated localhost port. That engine
-smoke establishes no phone-origin or selected-app claim.
+### Explicit repairs
 
-Focused runs at these checkpoints passed:
+- A missing/damaged signed payload offers app replacement guidance. Doctor does
+  not patch the sealed app or change macOS security settings.
+- Missing external iPhone utilities can use an explicit Homebrew repair. A preview
+  names the packages; **Install with Homebrew** starts installation with progress,
+  cancellation and a compatibility recheck.
+- The current allowlist is libimobiledevice 1.4.0 and ideviceinstaller 1.2.0.
+  Preflight requires reviewed stable versions and binary bottles. The adapter
+  requests no arbitrary tap, general upgrade or source build.
+- If Homebrew is absent, Doctor links to its official installation guidance as a
+  separate optional route. It does not silently bootstrap Homebrew or ask for a
+  password. The complete bundled app remains the preferred first-use route.
+- Cancellation stops the owned process group and awaits cleanup. Already installed
+  packages may remain and are disclosed. Captured installer output is bounded.
+  Stale configuration/preview/progress cannot authorize or overwrite another repair.
 
-| Check | Result |
+No actual Homebrew installation is part of automated validation. Fixtures use a
+synthetic runner or owned temporary processes.
+
+## Evidence and ownership
+
+Device checks and certificate preparation use the existing host, routing lease,
+timeline and export implementation. Opening setup/Doctor is read only. A live
+setup child remains part of the window/quit lifecycle; failure, cancellation or
+timeout cannot abandon connection recovery. iPhone forwarding remains until its
+tunnel-off confirmation and safe Stop.
+
+The browser check proves the tested browser path only. Other background clients
+may reject the CA or use pinning. Those failures remain separate diagnostics when
+the exact fresh browser proof succeeds; they do not erase that successful check.
+
+Logs remain app scoped and bounded unless whole-device logging is deliberately
+selected in Advanced Logging. Recording ZIPs retain admitted raw evidence, full
+network bodies, markers, the normalized shared timeline and checksums. Saving
+success does not imply every requested source emitted evidence.
+
+Older sessions containing task-plan metadata remain readable, but remembered
+task files are not restored into new capture settings. The schema/parser remains
+for evidence compatibility; normal UI has no Open Capture Plan action.
+
+Setup-only local export retains the public diagnostic report, engineer summary
+and checksums. Neither export adds private CA keys, WireGuard profiles, pairing
+secrets or automatic uploads.
+
+## Validation and remaining acceptance
+
+Swift 6 warnings-as-errors builds and focused fixtures cover first-use deferral,
+historical progress, selective identity invalidation, no task restoration,
+network-only child intent, actual proof time/freshness, recovery ownership,
+Doctor preview/configuration/cancellation and native menu targeting. Doctor
+process fixtures exercise real synthetic child-group cancellation/timeouts and
+bounded output; they contact no phones or package servers.
+
+| Focused validation | Result |
 | --- | --- |
-| `Scripts/test-capture-plan.sh` | 14 tests |
-| `Scripts/test-native-capture-services.sh` | 50 tests across four suites |
-| `Scripts/test-capture-setup-store.sh` | 12 tests, including synthetic certificate preparation/recovery |
-| `Scripts/test-native-timeline.sh` | 15 tests, including malformed/partial proof rejection |
-| `Scripts/test-native-capture-lifecycle.sh` | 35 tests |
-| Python capture compatibility | 68 passed; one optional native-engine case skipped |
+| Doctor service/process tests | 23 passed |
+| First-run setup and Doctor state tests | 23 passed |
+| Native capture-service and evidence-export tests | 50 passed |
+| Native timeline tests | 15 passed |
+| Native menu targeting tests | 6 passed |
+| Held timeline/filter/paging fixture | Passed |
+| Readiness/proof and non-pairing USB discovery fixtures | Passed |
+| Independent Mobile Capture and Oh My Android strict builds | Passed |
 
-Readiness, non-pairing USB discovery, iPhone profile validation, handoff, launcher
-and menu fixtures also passed at their implementation checkpoints. These fixture
-results do not substitute for the pending device and accessibility walkthroughs.
+The state tests include diagnosing an undetected iPhone without changing capture
+settings, stale repair-preview invalidation, and actual-owner session/selection
+preservation through installation cancellation cleanup.
 
-The final local package `MobileCapture-0.1.0-arm64-development-20261016-000215`
-built successfully with the opt-in iPhone USB candidate. Product boundaries,
-deep/strict code signatures, the pinned capture-engine smoke and clean-PATH USB
-version probes passed. It is an ad-hoc-signed arm64/macOS 26 development build,
-not a notarized release. No connected devices were contacted by these package
-probes.
+The earlier CI timestamp-oracle failure was isolated to Python 3.9 behavior. The
+timeline test now explicitly selects Python 3.11+; all 15 timeline tests and both
+independent CI build jobs passed after that correction. This is a test-runtime
+fix, not a production timestamp normalization change.
 
-One existing crash-recovery fixture had a 15-second startup expectation although
-the production Start permits 100 seconds. Under the full parallel synthetic load,
-discovery was still progressing at 15 seconds and reached recording at 24 seconds.
-Only this fixture now uses the production startup budget, with immediate failure
-on an exited supervisor or failed phase and bounded diagnostic output; other
-waits and suite parallelism are unchanged.
+The packaged Doctor check exposed a real upstream convention: pinned mitmdump
+12.2.3 exits 1 for its complete normal `--help` output. Doctor accepts that exact
+verified-engine/help response, while rejecting error output, malformed help,
+truncation and other failed exits. The release script now runs the real Doctor
+against the signed bundle before creating the ZIP.
 
-Final visual acceptance is pending: the computer-use service repeatedly crashed
-while reading the standalone window, including after resetting its connection.
-The crash reports identify `SkyComputerUseService`, not Mobile Capture. The
-initial standalone toolbar/accessibility tree was read successfully before that
-failure; this is not evidence that the guided screens passed visual review.
+The first-run screen rendered successfully during native visual inspection.
+Opening Doctor then crashed `SkyComputerUseService`; the Mobile Capture process
+remained running. Doctor and the remaining phone screens therefore have no
+completed visual/accessibility walkthrough from this run.
+
+The final local package is
+`MobileCapture-0.1.0-arm64-development-20261016-010654`. Its standalone product
+boundary, dependency closure, deep/strict signatures, clean-PATH engine/USB probes
+and actual Android/iPhone Doctor checks all passed before ZIP creation. The
+artifact includes the opt-in iPhone USB candidate, is ad-hoc signed for Apple
+Silicon/macOS 26, and is not a notarized public release. Its `SHA256SUMS` is stored
+beside the ZIP. These probes contacted no phones and installed no software.
+
+Hardware first-run walkthroughs, clean-Mac iPhone USB compatibility,
+VoiceOver/keyboard and actual Homebrew installation remain acceptance work.
+The known WireGuard engine shutdown crash, permanent release identity/artwork,
+Developer ID signing and notarization remain AdOps release gates.
+
+See [distribution](CAPTURE-DISTRIBUTION.md),
+[standalone migration](CAPTURE-STANDALONE-IMPLEMENTATION.md),
+[earlier logging proofs](CAPTURE-LOGGING-VALIDATION.md) and
+[platform capture proofs](CAPTURE-PROOF.md). The capture MCP remains planned.

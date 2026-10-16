@@ -1,8 +1,9 @@
 # First-run device setup plan
 
 Revised 2026-10-15 following the user's clarification. This replaces the previous
-task-oriented UX direction. It is a proposed simplification; the existing build
-is documented in [the implementation report](CAPTURE-SETUP-IMPLEMENTATION.md).
+task-oriented UX direction. The software implementation is documented in
+[the implementation report](CAPTURE-SETUP-IMPLEMENTATION.md); hardware/fresh-Mac
+acceptance and public release gates remain separate.
 
 ## Goal and scope
 
@@ -212,8 +213,8 @@ Developer ID signing and notarization before an AdOps release.
 5. **Acceptance/release:** test actual installation and both phone flows with a
    nontechnical teammate, including interruption recovery and keyboard/VoiceOver.
 
-Commit each implementation checkpoint with focused validation. This revision
-changes the plan/documentation only; the current app UI is unchanged.
+Commit each implementation checkpoint with focused validation. Implementation
+status and remaining validation are recorded in the implementation report above.
 
 ## Acceptance criteria
 

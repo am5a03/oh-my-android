@@ -21,8 +21,10 @@ utilities `idevice_id` and `ideviceinfo --simple` without Xcode, with full Xcode
 `ideviceinstaller` and `idevicesyslog`. The ordinary package does not bundle those
 USB tools yet; an explicitly selected development candidate can include them as
 described below. Network capture uses the bundled engine plus WireGuard on the
-iPhone. **Set Up Capture** guides profile import, certificate trust, a bounded
-capture check and recording; see [guided setup](CAPTURE-SETUP-IMPLEMENTATION.md).
+iPhone. **Device Setup…** guides profile import, certificate trust and a small
+network-only connection check, then returns to the timeline. **Doctor…** checks
+dependencies and offers explicit supported repairs; see
+[first-run setup and Doctor](CAPTURE-SETUP-IMPLEMENTATION.md).
 
 The physical-iPhone implementation checkpoint adds device discovery, USB logs
 and WireGuard lifecycle support. Separate physical USB-log and network-only
@@ -44,6 +46,19 @@ It relocates four utilities and nine libraries into `CaptureUSBTools.app`, keeps
 supplied notices/source recipes and a sealed manifest, signs the nested code, then
 signs the outer app and runs version-only probes with a clean `PATH`.
 No USB daemon is installed and these packaging probes contact no devices.
+
+The release script also runs the app's actual read-only Doctor against the
+signed bundle, checking Android prerequisites and, with this flag, the iPhone
+USB tools. It verifies version and help/capability behavior as well as signature,
+architecture and storage. A failure prevents ZIP creation. This is a local
+package check, not a phone connection or trust test. To repeat it separately:
+
+```sh
+bash Scripts/test-capture-doctor-bundle.sh \
+  "/absolute/path/Mobile Capture.app" --iphone-usb
+```
+
+Omit `--iphone-usb` for an ordinary package.
 
 The candidate passes static closure, signatures and version-only smoke on this
 development Mac. It still needs clean-Mac/iOS pairing, app enumeration, bounded
